@@ -144,7 +144,14 @@ export const StokOpname: React.FC<StokOpnameProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {opnameItems.map((item) => {
+            {opnameItems.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="py-12 text-center text-slate-400 text-xs">
+                  Belum ada produk di database untuk dilakukan stok opname.
+                </td>
+              </tr>
+            ) : (
+              opnameItems.map((item) => {
               const hasDiff = item.difference !== 0;
               const isNegative = item.difference < 0;
 
@@ -200,8 +207,9 @@ export const StokOpname: React.FC<StokOpnameProps> = ({
                   </td>
                 </tr>
               );
-            })}
-          </tbody>
+            })
+          )}
+        </tbody>
         </table>
       </div>
     </div>

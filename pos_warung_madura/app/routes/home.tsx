@@ -23,14 +23,8 @@ import { StokOpname } from "../components/StokOpname";
 import { Laporan } from "../components/Laporan";
 import { ReceiptModal } from "../components/ReceiptModal";
 import { QuickAddModal } from "../components/QuickAddModal";
-import { BarcodeSimulatorModal } from "../components/BarcodeSimulatorModal";
 import { ConnectPhoneScannerModal } from "../components/ConnectPhoneScannerModal";
 import { sendCustomerDisplayEvent } from "../services/customerDisplaySync";
-import {
-  initialProducts,
-  initialSales,
-  initialStockMovements,
-} from "../data/sampleData";
 import type {
   Product,
   ProductUnit,
@@ -50,12 +44,30 @@ export function meta({ }: Route.MetaArgs) {
   ];
 }
 
+import os from "node:os";
+
+function getLocalIpAddress(): string {
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name] || []) {
+        if (iface.family === "IPv4" && !iface.internal) {
+          return iface.address;
+        }
+      }
+    }
+  } catch (e) {}
+  return "192.168.1.12";
+}
+
 /**
  * LOADER: Berjalan di Node.js server lokal di laptop warung.
  * Mengambil produk & stok realtime dari MySQL.
+ * Tidak ada auto-seed atau dummy data otomatis; murni dari database MySQL lokal.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   const dbStatus = await testDbConnection();
+  const localIp = getLocalIpAddress();
 
   if (dbStatus.ok) {
     try {
@@ -68,18 +80,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return {
         dbConnected: true,
         dbMessage: dbStatus.message,
-        products: products.length > 0 ? products : initialProducts,
-        sales: sales.length > 0 ? sales : initialSales,
-        stockMovements: stockMovements.length > 0 ? stockMovements : initialStockMovements,
+        products: products,
+        sales: sales,
+        stockMovements: stockMovements,
+        detectedIp: localIp,
       };
     } catch (err: any) {
       console.error("Gagal load data dari MySQL:", err);
       return {
         dbConnected: false,
         dbMessage: err.message,
-        products: initialProducts,
-        sales: initialSales,
-        stockMovements: initialStockMovements,
+        products: [] as Product[],
+        sales: [] as Sale[],
+        stockMovements: [] as StockMovement[],
+        detectedIp: localIp,
       };
     }
   }
@@ -87,9 +101,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     dbConnected: false,
     dbMessage: dbStatus.message,
-    products: initialProducts,
-    sales: initialSales,
-    stockMovements: initialStockMovements,
+    products: [] as Product[],
+    sales: [] as Sale[],
+    stockMovements: [] as StockMovement[],
+    detectedIp: localIp,
   };
 }
 
@@ -182,8 +197,8 @@ export default function Home() {
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
   const [unknownBarcode, setUnknownBarcode] = useState<string | null>(null);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
-  const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [quickScanTriggerBarcode, setQuickScanTriggerBarcode] = useState<string | null>(null);
+  const [quickScanKulakanBarcode, setQuickScanKulakanBarcode] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Wireless Phone Scanner (PRD F12)
@@ -194,6 +209,17 @@ export default function Home() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+
+  // Keep activeTab & products in refs to eliminate stale closure in WebSocket message listener
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  const productsRef = useRef(products);
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
 
   // Sound beep on laptop
   const playLaptopBeep = () => {
@@ -215,27 +241,37 @@ export default function Home() {
   const lastPhoneScanCodeRef = useRef<string>("");
   const lastPhoneScanTimeRef = useRef<number>(0);
 
+  const handleIncomingPhoneScanRef = useRef<(barcode: string) => void>(() => {});
+
   const handleIncomingPhoneScan = (barcode: string) => {
     const cleanCode = barcode.trim();
     if (!cleanCode) return;
 
+    const currentTab = activeTabRef.current;
     const now = Date.now();
-    // Safety throttle: prevent same barcode repeating within 2000ms
-    if (cleanCode === lastPhoneScanCodeRef.current && now - lastPhoneScanTimeRef.current < 2000) {
+    // Safety throttle: 1000ms on kulakan for rapid carton scanning, 2000ms on kasir
+    const throttleMs = currentTab === "kulakan" ? 1000 : 2000;
+    if (cleanCode === lastPhoneScanCodeRef.current && now - lastPhoneScanTimeRef.current < throttleMs) {
       return;
     }
     lastPhoneScanCodeRef.current = cleanCode;
     lastPhoneScanTimeRef.current = now;
 
     playLaptopBeep();
-    setActiveTab("kasir");
-    setQuickScanTriggerBarcode(cleanCode);
+
+    // ROUTE ACCORDING TO CURRENT ACTIVE TAB VIA REF
+    if (currentTab === "kulakan") {
+      setQuickScanKulakanBarcode(cleanCode);
+    } else {
+      setActiveTab("kasir");
+      setQuickScanTriggerBarcode(cleanCode);
+    }
 
     // Look up product name to display toast & send back confirmation to phone
     let foundProduct: Product | undefined;
     let foundUnit: ProductUnit | undefined;
 
-    for (const p of products) {
+    for (const p of productsRef.current) {
       const u = p.units.find(
         (unit) => unit.barcode.toLowerCase() === cleanCode.toLowerCase()
       );
@@ -247,14 +283,16 @@ export default function Home() {
     }
 
     if (foundProduct && foundUnit) {
-      setPhoneScanToast(`📱 HP Scan: ${foundProduct.name} (${foundUnit.unitName})`);
+      const tabLabel = currentTab === "kulakan" ? "Kulakan" : "Kasir";
+      setPhoneScanToast(`📱 HP Scan [${tabLabel}]: ${foundProduct.name} (${foundUnit.unitName})`);
       setTimeout(() => setPhoneScanToast(null), 3000);
 
       const confirmMsg = {
         type: "SCAN_CONFIRMED",
         productName: foundProduct.name,
         unitName: foundUnit.unitName,
-        price: foundUnit.price,
+        price: currentTab === "kulakan" ? (foundUnit.costPrice || 0) : foundUnit.price,
+        mode: currentTab,
       };
 
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -266,8 +304,15 @@ export default function Home() {
     } else {
       setPhoneScanToast(`📱 HP Scan: Barcode Baru ${cleanCode}`);
       setTimeout(() => setPhoneScanToast(null), 3000);
+      if (currentTab === "kulakan") {
+        setUnknownBarcode(cleanCode);
+        setIsQuickAddOpen(true);
+      }
     }
   };
+
+  // Sync ref on every render so WebSocket always invokes latest version
+  handleIncomingPhoneScanRef.current = handleIncomingPhoneScan;
 
   // WebSocket & BroadcastChannel listener for F12
   useEffect(() => {
@@ -280,7 +325,7 @@ export default function Home() {
           setIsPhoneConnected(true);
           setPhoneDeviceName(event.data.deviceName || "HP Kasir");
         } else if (event.data?.type === "SCAN" && event.data.barcode) {
-          handleIncomingPhoneScan(event.data.barcode);
+          handleIncomingPhoneScanRef.current(event.data.barcode);
         }
       };
     } catch (e) {}
@@ -309,7 +354,7 @@ export default function Home() {
             } else if (data.type === "CLIENT_DISCONNECTED") {
               setIsPhoneConnected(false);
             } else if (data.type === "SCAN" && data.barcode) {
-              handleIncomingPhoneScan(data.barcode);
+              handleIncomingPhoneScanRef.current(data.barcode);
             }
           } catch (e) {}
         };
@@ -329,7 +374,7 @@ export default function Home() {
       wsRef.current?.close();
       broadcastChannelRef.current?.close();
     };
-  }, [products]);
+  }, []);
 
   // Keyboard shortcut listeners (F2..F6, Escape)
   useEffect(() => {
@@ -352,7 +397,6 @@ export default function Home() {
       } else if (e.key === "Escape") {
         setIsReceiptOpen(false);
         setIsQuickAddOpen(false);
-        setIsSimulatorOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -418,7 +462,27 @@ export default function Home() {
 
   const handleSaveAndAddToCart = (newProduct: Product, unit: ProductUnit) => {
     handleAddProduct(newProduct);
-    setQuickScanTriggerBarcode(unit.barcode);
+    if (activeTabRef.current === "kulakan") {
+      setQuickScanKulakanBarcode(unit.barcode);
+    } else {
+      setQuickScanTriggerBarcode(unit.barcode);
+    }
+    setIsQuickAddOpen(false);
+  };
+
+  const handleAddUnitToExistingProduct = (productId: string, newUnit: ProductUnit) => {
+    const prod = products.find((p) => p.id === productId);
+    if (!prod) return;
+    const updatedProd: Product = {
+      ...prod,
+      units: [...prod.units, newUnit],
+    };
+    handleUpdateProduct(updatedProd);
+    if (activeTabRef.current === "kulakan") {
+      setQuickScanKulakanBarcode(newUnit.barcode);
+    } else {
+      setQuickScanTriggerBarcode(newUnit.barcode);
+    }
     setIsQuickAddOpen(false);
   };
 
@@ -528,7 +592,6 @@ export default function Home() {
         pendingSyncCount={pendingSyncCount}
         onTriggerSync={handleTriggerSync}
         isSyncing={isSyncing || navigation.state === "submitting"}
-        onOpenQuickScan={() => setIsSimulatorOpen(true)}
         onOpenPhoneScannerModal={() => setIsConnectPhoneModalOpen(true)}
         isPhoneConnected={isPhoneConnected}
         dbConnected={loaderData.dbConnected}
@@ -575,6 +638,11 @@ export default function Home() {
             products={products}
             stockMovements={stockMovements}
             onAddStockMovement={handleAddStockMovement}
+            quickScanTriggerBarcode={quickScanKulakanBarcode}
+            onClearQuickScanTrigger={() => setQuickScanKulakanBarcode(null)}
+            onRequestUnknownBarcode={handleRequestUnknownBarcode}
+            onOpenPhoneModal={() => setIsConnectPhoneModalOpen(true)}
+            isPhoneConnected={isPhoneConnected}
           />
         )}
 
@@ -626,16 +694,9 @@ export default function Home() {
         isOpen={isQuickAddOpen}
         onClose={() => setIsQuickAddOpen(false)}
         onSaveAndAddToCart={handleSaveAndAddToCart}
-      />
-
-      <BarcodeSimulatorModal
-        isOpen={isSimulatorOpen}
-        onClose={() => setIsSimulatorOpen(false)}
+        onAddUnitToExistingProduct={handleAddUnitToExistingProduct}
         products={products}
-        onScanCode={(code) => {
-          setActiveTab("kasir");
-          setQuickScanTriggerBarcode(code);
-        }}
+        mode={activeTab === "kulakan" ? "kulakan" : "kasir"}
       />
 
       {/* Connect Wireless Phone Scanner Modal (PRD F12) */}
@@ -644,6 +705,7 @@ export default function Home() {
         onClose={() => setIsConnectPhoneModalOpen(false)}
         isPhoneConnected={isPhoneConnected}
         phoneDeviceName={phoneDeviceName}
+        detectedIp={(loaderData as any).detectedIp}
       />
     </div>
   );

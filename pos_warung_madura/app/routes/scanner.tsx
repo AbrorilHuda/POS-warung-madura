@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Camera,
   CameraOff,
-  Zap,
   Wifi,
   WifiOff,
   CheckCircle2,
@@ -66,6 +65,7 @@ export default function MobileScanner() {
   const detectorRef = useRef<any>(null);
   const pauseTimerRef = useRef<any>(null);
   const feedbackTimerRef = useRef<any>(null);
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Sync cooldown ref with state
   useEffect(() => {
@@ -427,16 +427,74 @@ export default function MobileScanner() {
           !videoRef.current.paused &&
           detectorRef.current
         ) {
-          try {
-            const barcodes = await detectorRef.current.detect(videoRef.current);
-            if (barcodes && barcodes.length > 0) {
-              const rawVal = barcodes[0].rawValue;
-              if (rawVal) {
-                handleScannedBarcode(rawVal);
+          const video = videoRef.current;
+          const vw = video.videoWidth;
+          const vh = video.videoHeight;
+
+          if (vw > 0 && vh > 0) {
+            // Region of Interest (ROI): Ambil hanya area di dalam kotak tengah (60% lebar, 45% tinggi)
+            // Hal ini memastikan barcode produk di samping/luar kotak sama sekali TIDAK BISA terbaca!
+            const cropW = Math.round(vw * 0.60);
+            const cropH = Math.round(vh * 0.45);
+            const cropX = Math.round((vw - cropW) / 2);
+            const cropY = Math.round((vh - cropH) / 2);
+
+            if (!offscreenCanvasRef.current) {
+              offscreenCanvasRef.current = document.createElement("canvas");
+            }
+            const canvas = offscreenCanvasRef.current;
+            canvas.width = 480;
+            canvas.height = 320;
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+            if (ctx) {
+              // Gambar HANYA area di dalam kotak tengah ke canvas kecil
+              ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, 480, 320);
+
+              try {
+                let barcodes: any[] = [];
+                try {
+                  barcodes = await detectorRef.current.detect(canvas);
+                } catch (canvasErr) {
+                  // Fallback: deteksi video penuh namun FILTER KETAT hanya jika koordinat barcode berada di dalam kotak tengah
+                  const fullBarcodes = await detectorRef.current.detect(video);
+                  if (fullBarcodes && fullBarcodes.length > 0) {
+                    barcodes = fullBarcodes.filter((b: any) => {
+                      if (!b.boundingBox) return true;
+                      const cx = b.boundingBox.x + b.boundingBox.width / 2;
+                      const cy = b.boundingBox.y + b.boundingBox.height / 2;
+                      return cx >= cropX && cx <= cropX + cropW && cy >= cropY && cy <= cropY + cropH;
+                    });
+                  }
+                }
+
+                if (barcodes && barcodes.length > 0) {
+                  // Jika ada lebih dari 1 barcode di dalam kotak, pilih yang paling dekat dengan garis laser tengah
+                  let selectedBarcode = barcodes[0];
+                  if (barcodes.length > 1) {
+                    let minDist = Infinity;
+                    for (const b of barcodes) {
+                      if (b.boundingBox) {
+                        const cx = b.boundingBox.x + b.boundingBox.width / 2;
+                        const cy = b.boundingBox.y + b.boundingBox.height / 2;
+                        const dist = Math.hypot(cx - 240, cy - 160);
+                        if (dist < minDist) {
+                          minDist = dist;
+                          selectedBarcode = b;
+                        }
+                      }
+                    }
+                  }
+
+                  const rawVal = selectedBarcode.rawValue;
+                  if (rawVal) {
+                    handleScannedBarcode(rawVal);
+                  }
+                }
+              } catch (e) {
+                // Frame miss normal
               }
             }
-          } catch (e) {
-            // Frame miss is normal
           }
         }
       }
@@ -652,18 +710,24 @@ export default function MobileScanner() {
             </div>
           )}
 
-          {/* Viewfinder Target Reticle with Dynamic Scan Feedback */}
+          {/* Viewfinder Target Reticle with Darkened Mask & High Precision Framing */}
           {cameraActive && (
-            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-6 z-10">
+            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-6 z-10 overflow-hidden">
               <div
-                className={`w-60 h-36 rounded-2xl relative flex items-center justify-center transition-all duration-300 ${
+                className={`w-64 h-38 rounded-2xl relative flex items-center justify-center transition-all duration-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.52)] ${
                   scanFeedback
-                    ? "border-3 border-emerald-400 bg-emerald-500/15 shadow-[0_0_25px_rgba(52,211,153,0.5)] scale-102"
+                    ? "border-3 border-emerald-400 bg-emerald-500/15 shadow-[0_0_0_9999px_rgba(0,0,0,0.6),0_0_30px_rgba(52,211,153,0.6)] scale-102"
                     : isScanningPaused
-                    ? "border-2 border-dashed border-amber-400/40 bg-black/20"
-                    : "border-2 border-dashed border-amber-400/90"
+                    ? "border-2 border-dashed border-amber-400/40"
+                    : "border-2 border-amber-400/90"
                 }`}
               >
+                {/* 4 Corner L-Brackets for Professional Scanner Framing */}
+                <div className="absolute -top-1 -left-1 w-4 h-4 border-t-3 border-l-3 border-amber-400 rounded-tl-lg" />
+                <div className="absolute -top-1 -right-1 w-4 h-4 border-t-3 border-r-3 border-amber-400 rounded-tr-lg" />
+                <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-3 border-l-3 border-amber-400 rounded-bl-lg" />
+                <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-3 border-r-3 border-amber-400 rounded-br-lg" />
+
                 {/* Laser scan line effect (only active when ready to scan) */}
                 {!isScanningPaused && !scanFeedback && (
                   <div className="w-full h-0.5 bg-rose-500 shadow-md shadow-rose-500/80 absolute top-1/2 -translate-y-1/2 animate-pulse"></div>
@@ -692,8 +756,8 @@ export default function MobileScanner() {
                     </span>
                   </div>
                 ) : (
-                  <span className="absolute -bottom-6 left-0 right-0 text-center text-[10px] font-mono text-amber-300 font-semibold tracking-wider drop-shadow">
-                    ARAHKAN KE BARCODE
+                  <span className="absolute -bottom-6 left-0 right-0 text-center text-[10px] font-mono text-amber-300 font-bold tracking-wider drop-shadow">
+                    PASKAN BARCODE KE DALAM KOTAK
                   </span>
                 )}
               </div>
@@ -805,43 +869,7 @@ export default function MobileScanner() {
           </form>
         </div>
 
-        {/* Quick Simulator Test Pills on Mobile */}
-        <div className="space-y-1.5">
-          <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-            <Zap className="w-3 h-3 text-amber-400" />
-            Tombol Uji Cepat (Simulasi):
-          </span>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => handleScannedBarcode("899238812039")}
-              className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-left transition"
-            >
-              <span className="font-bold text-xs text-white block">Sampoerna Mild</span>
-              <span className="text-[10px] text-slate-400 font-mono">Bungkus: 899238812039</span>
-            </button>
-            <button
-              onClick={() => handleScannedBarcode("089686010999")}
-              className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-left transition"
-            >
-              <span className="font-bold text-xs text-white block">Indomie Goreng</span>
-              <span className="text-[10px] text-slate-400 font-mono">Dus: 089686010999</span>
-            </button>
-            <button
-              onClick={() => handleScannedBarcode("899600141401")}
-              className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-left transition"
-            >
-              <span className="font-bold text-xs text-white block">Le Minerale</span>
-              <span className="text-[10px] text-slate-400 font-mono">Botol: 899600141401</span>
-            </button>
-            <button
-              onClick={() => handleScannedBarcode(`899${Math.floor(100000000 + Math.random() * 900000000)}`)}
-              className="p-2.5 rounded-xl bg-rose-950/50 border border-rose-800/60 hover:bg-rose-900/50 text-left transition"
-            >
-              <span className="font-bold text-xs text-rose-300 block">+ Barcode Baru</span>
-              <span className="text-[10px] text-slate-400 font-mono">Uji Modal Cepat</span>
-            </button>
-          </div>
-        </div>
+
 
         {/* History of recent scans */}
         {recentScans.length > 0 && (

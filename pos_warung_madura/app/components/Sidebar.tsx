@@ -9,7 +9,6 @@ import {
   CloudUpload,
   RefreshCw,
   Clock,
-  Sparkles,
   Wifi,
   Store,
   Smartphone,
@@ -22,7 +21,6 @@ interface SidebarProps {
   pendingSyncCount: number;
   onTriggerSync: () => void;
   isSyncing: boolean;
-  onOpenQuickScan: () => void;
   onOpenPhoneScannerModal?: () => void;
   isPhoneConnected?: boolean;
   dbConnected?: boolean;
@@ -35,7 +33,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   pendingSyncCount,
   onTriggerSync,
   isSyncing,
-  onOpenQuickScan,
   onOpenPhoneScannerModal,
   isPhoneConnected = false,
   dbConnected = true,
@@ -173,14 +170,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
         </button>
 
-        {/* Barcode Simulator Button */}
-        <button
-          onClick={onOpenQuickScan}
-          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold transition"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-          <span>Tes Scan Barcode</span>
-        </button>
 
         {/* Wireless HP Scanner Button (PRD F12) */}
         {onOpenPhoneScannerModal && (

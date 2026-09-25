@@ -129,49 +129,55 @@ export const Laporan: React.FC<LaporanProps> = ({
         </h3>
 
         <div className="space-y-2">
-          {sales.map((sale) => (
-            <div
-              key={sale.id}
-              className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 hover:border-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs transition"
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono font-bold text-slate-900 text-xs">
-                    {sale.invoiceCode}
-                  </span>
-                  <span
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                      sale.syncStatus === "synced"
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-amber-50 text-amber-800"
-                    }`}
-                  >
-                    {sale.syncStatus === "synced" ? "Tersinkron" : "Antrean Sync"}
-                  </span>
-                </div>
-                <p className="text-slate-500 text-[11px] mt-0.5">
-                  {sale.timestamp} &bull; {sale.paymentMethod} &bull; Kasir: {sale.cashierName}
-                </p>
-                <p className="text-slate-400 text-[10px] mt-0.5">
-                  {sale.items.map((i) => `${i.productName} (${i.qty} ${i.unitName})`).join(", ")}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 justify-between sm:justify-end">
-                <span className="font-mono font-bold text-xs text-slate-900">
-                  Rp {sale.totalAmount.toLocaleString("id-ID")}
-                </span>
-
-                <button
-                  onClick={() => onViewSaleReceipt(sale)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-medium transition cursor-pointer"
-                >
-                  <Eye className="w-3 h-3 text-slate-500" />
-                  <span>Struk</span>
-                </button>
-              </div>
+          {sales.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-xs">
+              Belum ada riwayat transaksi penjualan tercatat. Transaksi kasir akan muncul di sini.
             </div>
-          ))}
+          ) : (
+            sales.map((sale) => (
+              <div
+                key={sale.id}
+                className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 hover:border-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs transition"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-slate-900 text-xs">
+                      {sale.invoiceCode}
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                        sale.syncStatus === "synced"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-amber-50 text-amber-800"
+                      }`}
+                    >
+                      {sale.syncStatus === "synced" ? "Tersinkron" : "Antrean Sync"}
+                    </span>
+                  </div>
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    {sale.timestamp} &bull; {sale.paymentMethod} &bull; Kasir: {sale.cashierName}
+                  </p>
+                  <p className="text-slate-400 text-[10px] mt-0.5">
+                    {sale.items.map((i) => `${i.productName} (${i.qty} ${i.unitName})`).join(", ")}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 justify-between sm:justify-end">
+                  <span className="font-mono font-bold text-xs text-slate-900">
+                    Rp {sale.totalAmount.toLocaleString("id-ID")}
+                  </span>
+
+                  <button
+                    onClick={() => onViewSaleReceipt(sale)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-medium transition cursor-pointer"
+                  >
+                    <Eye className="w-3 h-3 text-slate-500" />
+                    <span>Struk</span>
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

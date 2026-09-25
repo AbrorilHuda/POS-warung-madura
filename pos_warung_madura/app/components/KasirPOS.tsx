@@ -437,9 +437,13 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
             {filteredProducts.length === 0 ? (
               <div className="col-span-full py-16 text-center text-slate-400 bg-white rounded-2xl border border-slate-200 p-8 space-y-2">
                 <ShoppingBag className="w-10 h-10 mx-auto text-slate-300" />
-                <h4 className="font-bold text-slate-700 text-sm">Produk tidak ditemukan</h4>
-                <p className="text-xs text-slate-400">
-                  Tidak ada barang dengan kata kunci &quot;{searchQuery}&quot;. Periksa ejaan atau scan barcode baru.
+                <h4 className="font-bold text-slate-700 text-sm">
+                  {products.length === 0 ? "Belum Ada Produk di Database" : "Produk tidak ditemukan"}
+                </h4>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  {products.length === 0
+                    ? "Database masih kosong dan bersih. Silakan daftarkan produk pertama di menu Master Barang atau scan barcode barang dengan HP."
+                    : `Tidak ada barang dengan kata kunci "${searchQuery}". Periksa ejaan atau scan barcode baru.`}
                 </p>
               </div>
             ) : (

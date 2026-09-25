@@ -7,13 +7,18 @@ import {
   Copy,
   CheckCircle2,
   Sparkles,
+  QrCode,
+  ShieldAlert,
+  Info,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 
 interface ConnectPhoneScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
   isPhoneConnected: boolean;
   phoneDeviceName: string | null;
+  detectedIp?: string;
 }
 
 export const ConnectPhoneScannerModal: React.FC<ConnectPhoneScannerModalProps> = ({
@@ -21,17 +26,16 @@ export const ConnectPhoneScannerModal: React.FC<ConnectPhoneScannerModalProps> =
   onClose,
   isPhoneConnected,
   phoneDeviceName,
+  detectedIp,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [activeIp, setActiveIp] = useState<string>(detectedIp || "192.168.1.12");
 
   if (!isOpen) return null;
 
   const protocol = typeof window !== "undefined" ? window.location.protocol : "https:";
   const port = typeof window !== "undefined" ? window.location.port : "5174";
-  const hostname = typeof window !== "undefined" ? window.location.hostname : "localhost";
-  // If viewing on localhost on the laptop, target the LAN IP so phone can connect
-  const targetHost = hostname === "localhost" || hostname === "127.0.0.1" ? "192.168.1.12" : hostname;
-  const scannerUrl = `https://${targetHost}${port ? `:${port}` : ""}/scanner`;
+  const scannerUrl = `${protocol}//${activeIp}${port ? `:${port}` : ""}/scanner`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(scannerUrl);
@@ -40,109 +44,138 @@ export const ConnectPhoneScannerModal: React.FC<ConnectPhoneScannerModalProps> =
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-xs">
-      <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center">
-              <Smartphone className="w-4 h-4 text-amber-400" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+      <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        {/* Header Modal */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-md">
+              <Smartphone className="w-5 h-5 text-amber-400" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-900 text-sm">Hubungkan Scanner HP</h3>
-              <p className="text-[11px] text-slate-500">Fitur PRD F12: Scanner Nirkabel WebSocket</p>
+              <h3 className="font-bold text-slate-900 text-base">
+                Hubungkan HP sebagai Scanner Barcode
+              </h3>
+              <p className="text-xs text-slate-500">
+                Fitur F12: Scanner Nirkabel Kamera Smartphone via WebSocket
+              </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
-            <X className="w-4 h-4" />
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+          >
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Body */}
-        <div className="p-6 flex flex-col items-center text-center space-y-4">
-          {/* Status Badge */}
+        {/* Modal Body */}
+        <div className="p-6 flex flex-col items-center text-center space-y-4 max-h-[80vh] overflow-y-auto">
+          {/* Status Koneksi WebSocket */}
           <div
-            className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 ${
+            className={`px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 border transition ${
               isPhoneConnected
-                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                : "bg-slate-100 text-slate-600 border border-slate-200"
+                ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                : "bg-amber-50 text-amber-800 border-amber-200"
             }`}
           >
             <span
-              className={`w-2 h-2 rounded-full ${
-                isPhoneConnected ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
+              className={`w-2.5 h-2.5 rounded-full ${
+                isPhoneConnected ? "bg-emerald-500 animate-ping" : "bg-amber-500 animate-pulse"
               }`}
-            ></span>
+            />
             <span>
               {isPhoneConnected
-                ? `🟢 Terhubung: ${phoneDeviceName || "HP Kasir"}`
-                : "Menunggu Koneksi dari HP..."}
+                ? `🟢 HP Terhubung: ${phoneDeviceName || "HP Kasir"}`
+                : "Menunggu Scan & Koneksi dari HP..."}
             </span>
           </div>
 
-          {/* QR Code Graphic pointing to /scanner URL */}
-          <div className="p-3 bg-white border-2 border-slate-900 rounded-2xl shadow-sm flex flex-col items-center">
-            {/* SVG Visual QR Mock */}
-            <div className="w-36 h-36 bg-slate-900 rounded p-1.5 flex items-center justify-center">
-              <div className="w-full h-full bg-white p-1 grid grid-cols-7 grid-rows-7 gap-0.5">
-                <div className="col-span-2 row-span-2 bg-black"></div>
-                <div className="bg-black"></div>
-                <div className="bg-transparent"></div>
-                <div className="col-span-2 row-span-2 bg-black"></div>
-                <div className="bg-black"></div>
-                <div className="bg-transparent"></div>
-                <div className="bg-black"></div>
-                <div className="bg-transparent"></div>
-                <div className="bg-black"></div>
-                <div className="col-span-3 bg-black"></div>
-                <div className="col-span-2 bg-black"></div>
-                <div className="bg-black"></div>
-                <div className="col-span-2 row-span-2 bg-black"></div>
-                <div className="col-span-2 bg-black"></div>
-                <div className="col-span-2 row-span-2 bg-black"></div>
+          {/* REAL, SCANNABLE QR CODE UTAMA */}
+          <div className="p-5 bg-white border-2 border-slate-900 rounded-3xl shadow-xl flex flex-col items-center space-y-2">
+            <div className="bg-white p-2 rounded-2xl">
+              <QRCodeSVG
+                value={scannerUrl}
+                size={190}
+                level="M"
+                includeMargin={false}
+              />
+            </div>
+            <div className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-slate-900 uppercase tracking-wider pt-1">
+              <QrCode className="w-4 h-4 text-emerald-600" />
+              <span>Arahkan Kamera HP ke QR Code Ini</span>
+            </div>
+          </div>
+
+          {/* IP Address Switcher & URL Box */}
+          <div className="w-full space-y-2 text-left">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-slate-700">Alamat URL Scanner di HP:</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] text-slate-400">IP Laptop:</span>
+                <input
+                  type="text"
+                  value={activeIp}
+                  onChange={(e) => setActiveIp(e.target.value.trim())}
+                  className="font-mono text-[11px] px-2 py-0.5 rounded border border-slate-300 bg-slate-50 w-28 text-center font-bold text-slate-800 focus:outline-none focus:bg-white focus:ring-1 focus:ring-slate-900"
+                  title="Ubah jika IP Wi-Fi laptop berubah"
+                />
               </div>
             </div>
-            <span className="text-[10px] font-mono text-slate-500 font-semibold mt-1.5">
-              SCAN DENGAN HP KASIR
-            </span>
-          </div>
 
-          {/* URL Box */}
-          <div className="w-full space-y-1">
-            <span className="text-xs text-slate-500">Atau buka alamat ini di browser HP:</span>
             <div className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="font-mono text-xs text-slate-900 flex-1 truncate text-left select-all">
+              <span className="font-mono text-xs text-slate-900 flex-1 truncate select-all px-1">
                 {scannerUrl}
               </span>
               <button
                 onClick={handleCopy}
-                className="p-1 text-slate-500 hover:text-slate-900"
-                title="Salin Alamat"
+                className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="Salin Alamat URL"
               >
-                {copied ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                {copied ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-emerald-700 font-bold">Tersalin</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Salin</span>
+                  </>
+                )}
               </button>
               <a
                 href={scannerUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="p-1 text-slate-500 hover:text-slate-900"
+                className="p-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition"
                 title="Buka di Tab Baru"
               >
-                <ExternalLink className="w-4 h-4" />
+                <ExternalLink className="w-3.5 h-3.5" />
               </a>
             </div>
           </div>
 
-          {/* Instructions */}
-          <div className="w-full text-left p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 space-y-1.5">
-            <p className="font-semibold text-slate-800">Petunjuk Pemakaian:</p>
-            <ol className="list-decimal pl-4 space-y-1 text-[11px]">
-              <li>Pastikan HP terhubung ke Wi-Fi / Hotspot yang sama dengan laptop.</li>
-              <li>Buka alamat HTTPS di atas di browser HP Anda.</li>
+          {/* Petunjuk Praktis Pemakaian */}
+          <div className="w-full text-left p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 space-y-2">
+            <div className="flex items-center gap-1.5 font-bold text-slate-800">
+              <Info className="w-4 h-4 text-amber-500" />
+              <span>Langkah Menghubungkan:</span>
+            </div>
+            <ol className="list-decimal pl-4 space-y-1.5 text-[11px] leading-relaxed">
               <li>
-                <strong className="text-slate-800">Catatan Sertifikat SSL:</strong> Jika muncul peringatan &quot;Koneksi tidak privat&quot;, klik <strong>Lanjutan (Advanced)</strong> &rarr; pilih <strong>Lanjutkan ke situs (Aman)</strong>.
+                Pastikan HP dan Laptop terhubung ke <strong className="text-slate-800">Wi-Fi atau Hotspot HP yang sama</strong>.
               </li>
-              <li>Izinkan akses kamera di HP &rarr; sorot barcode barang &rarr; otomatis masuk ke keranjang laptop!</li>
+              <li>
+                Buka kamera bawaan HP / Google Lens, lalu <strong className="text-slate-800">scan QR Code di atas</strong> dan buka link-nya.
+              </li>
+              <li className="bg-amber-100/70 p-2 rounded-xl text-amber-900 border border-amber-200">
+                <strong className="block font-bold">Penting (Sertifikat SSL Lokal):</strong>
+                Jika browser HP memunculkan peringatan <em>&quot;Koneksi tidak privat&quot;</em>, cukup klik <strong className="underline">Lanjutan / Advanced</strong> &rarr; pilih <strong className="underline">Lanjutkan ke situs (Aman)</strong>.
+              </li>
+              <li>
+                Setelah halaman terbuka di HP, izinkan akses kamera &rarr; sorot barcode produk &rarr; item <strong className="text-slate-900">langsung masuk otomatis ke keranjang kasir!</strong>
+              </li>
             </ol>
           </div>
         </div>

@@ -183,8 +183,7 @@ WHERE p.is_active = TRUE
 GROUP BY p.id, p.name, p.category, p.base_unit, p.min_stock_alert;
 
 -- ============================================================================
--- DATA AWAL (SEED DATA SAMPLE)
--- Profil Warung & Produk Contoh Warung Madura
+-- KONFIGURASI AWAL (STORE SETTINGS)
 -- ============================================================================
 INSERT INTO store_settings (setting_key, setting_value) VALUES
   ('store_code', 'WM01'),
@@ -193,48 +192,5 @@ INSERT INTO store_settings (setting_key, setting_value) VALUES
   ('receipt_footer', 'Matur Sembah Nuwun! Buka 24 Jam Non-Stop')
 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
 
--- 1. Produk: Sampoerna A Mild 16
-INSERT INTO products (id, name, category, base_unit, min_stock_alert)
-VALUES ('p-01', 'Sampoerna A Mild 16', 'Rokok', 'batang', 80)
-ON DUPLICATE KEY UPDATE name = VALUES(name);
-
-INSERT INTO product_units (id, product_id, unit_name, conversion_ratio, price, cost_price, barcode, is_base_unit) VALUES
-  ('u-01-batang', 'p-01', 'Ketengan (Batang)', 1.0000, 2500.00, 2000.00, '001-SMP-BTG', TRUE),
-  ('u-01-pack',   'p-01', 'Bungkus (16 Btg)',  16.0000, 33500.00, 30500.00, '899238812039', FALSE),
-  ('u-01-slop',   'p-01', 'Slop (10 Bks)',    160.0000, 330000.00, 300000.00, '899238812040', FALSE)
-ON DUPLICATE KEY UPDATE price = VALUES(price);
-
--- Stok awal A Mild (2 Slop = 320 batang)
-INSERT INTO stock_movements (id, product_id, type, quantity_in_base_unit, unit_name_used, unit_qty_used, cost_per_unit, notes)
-VALUES ('mov-seed-01', 'p-01', 'in', 320.0000, 'Slop (10 Bks)', 2.0000, 300000.00, 'Stok Awal')
-ON DUPLICATE KEY UPDATE quantity_in_base_unit = VALUES(quantity_in_base_unit);
-
--- 2. Produk: Indomie Goreng Spesial 85g
-INSERT INTO products (id, name, category, base_unit, min_stock_alert)
-VALUES ('p-02', 'Indomie Goreng Spesial 85g', 'Mie & Sembako', 'pcs', 40)
-ON DUPLICATE KEY UPDATE name = VALUES(name);
-
-INSERT INTO product_units (id, product_id, unit_name, conversion_ratio, price, cost_price, barcode, is_base_unit) VALUES
-  ('u-02-pcs', 'p-02', 'Pcs', 1.0000, 3500.00, 2950.00, '089686010924', TRUE),
-  ('u-02-dus', 'p-02', 'Dus (40 Pcs)', 40.0000, 132000.00, 118000.00, '089686010999', FALSE)
-ON DUPLICATE KEY UPDATE price = VALUES(price);
-
--- Stok awal Indomie (3 Dus = 120 pcs)
-INSERT INTO stock_movements (id, product_id, type, quantity_in_base_unit, unit_name_used, unit_qty_used, cost_per_unit, notes)
-VALUES ('mov-seed-02', 'p-02', 'in', 120.0000, 'Dus (40 Pcs)', 3.0000, 118000.00, 'Stok Awal')
-ON DUPLICATE KEY UPDATE quantity_in_base_unit = VALUES(quantity_in_base_unit);
-
--- 3. Produk: Le Minerale Dingin 600ml
-INSERT INTO products (id, name, category, base_unit, min_stock_alert)
-VALUES ('p-03', 'Le Minerale Dingin 600ml', 'Minuman Dingin', 'botol', 24)
-ON DUPLICATE KEY UPDATE name = VALUES(name);
-
-INSERT INTO product_units (id, product_id, unit_name, conversion_ratio, price, cost_price, barcode, is_base_unit) VALUES
-  ('u-03-botol', 'p-03', 'Botol Dingin', 1.0000, 4000.00, 2800.00, '899600141401', TRUE),
-  ('u-03-dus',   'p-03', 'Dus (24 Btl)', 24.0000, 88000.00, 66000.00, '899600141499', FALSE)
-ON DUPLICATE KEY UPDATE price = VALUES(price);
-
--- Stok awal Le Minerale (2 Dus = 48 botol)
-INSERT INTO stock_movements (id, product_id, type, quantity_in_base_unit, unit_name_used, unit_qty_used, cost_per_unit, notes)
-VALUES ('mov-seed-03', 'p-03', 'in', 48.0000, 'Dus (24 Btl)', 2.0000, 66000.00, 'Stok Awal')
-ON DUPLICATE KEY UPDATE quantity_in_base_unit = VALUES(quantity_in_base_unit);
+-- Catatan: Master produk & transaksi dibiarkan bersih/kosong agar kasir
+-- dapat menginput data barang secara manual dari awal.

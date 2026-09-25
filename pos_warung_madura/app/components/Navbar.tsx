@@ -12,7 +12,6 @@ import {
   RefreshCw,
   Store,
   Clock,
-  Sparkles,
   Monitor,
 } from "lucide-react";
 
@@ -22,7 +21,6 @@ interface NavbarProps {
   pendingSyncCount: number;
   onTriggerSync: () => void;
   isSyncing: boolean;
-  onOpenQuickScan: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -31,7 +29,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   pendingSyncCount,
   onTriggerSync,
   isSyncing,
-  onOpenQuickScan,
 }) => {
   const [time, setTime] = useState<string>("");
 
@@ -163,15 +160,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </div>
 
-            {/* Quick Scan Simulator Trigger */}
-            <button
-              onClick={onOpenQuickScan}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-rose-500 text-white font-medium text-xs shadow-md shadow-amber-500/20 hover:from-amber-600 hover:to-rose-600 transition"
-              title="Simulasi scan barcode barang atau uji scanner"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Simulasi Barcode</span>
-            </button>
 
             {/* Layar Pelanggan (Customer Facing Dual Screen) */}
             <button

@@ -376,7 +376,32 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
       </div>
 
       {/* Products Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {filtered.length === 0 ? (
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-12 text-center shadow-xs">
+          <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center mb-3.5">
+            <Package className="w-7 h-7" />
+          </div>
+          <h3 className="font-bold text-slate-900 text-sm">
+            {products.length === 0 ? "Belum Ada Produk di Database" : "Produk Tidak Ditemukan"}
+          </h3>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-5">
+            {products.length === 0
+              ? "Database Anda masih kosong dan siap diinput manual. Klik tombol di bawah untuk mulai mendaftarkan produk pertama warung Anda."
+              : "Tidak ada produk yang cocok dengan pencarian atau kategori ini."}
+          </p>
+          {products.length === 0 && (
+            <button
+              type="button"
+              onClick={handleOpenAddModal}
+              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-bold transition shadow-sm inline-flex items-center gap-2 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Produk Pertama Manual</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filtered.map((prod) => (
           <div
             key={prod.id}
@@ -469,6 +494,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           </div>
         ))}
       </div>
+    )}
 
       {/* Modal Tambah / Ubah Produk */}
       {isModalOpen && (
