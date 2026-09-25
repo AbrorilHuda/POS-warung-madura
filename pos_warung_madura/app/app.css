@@ -49,3 +49,40 @@ body {
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+/* Print thermal styling: hanya cetak struk barcode fisik secara bersih */
+@media print {
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #printable-barcode-receipt,
+  #printable-barcode-receipt * {
+    visibility: visible;
+  }
+
+  #printable-barcode-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 6px !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+}

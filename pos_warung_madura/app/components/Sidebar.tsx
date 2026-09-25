@@ -13,6 +13,7 @@ import {
   Wifi,
   Store,
   Smartphone,
+  Monitor,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -126,7 +127,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Bottom Area: Sync & Quick Actions */}
-      <div className="p-4 border-t border-slate-100 space-y-2.5 bg-slate-50/50">
+      <div className="p-4 border-t border-slate-100 space-y-2 bg-slate-50/50">
+        {/* Layar Pelanggan (Monitor Kedua) */}
+        <button
+          onClick={() => window.open("/display", "_blank", "width=1200,height=800")}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition cursor-pointer shadow-2xs"
+          title="Buka Layar Pelanggan di monitor kedua"
+        >
+          <div className="flex items-center gap-2">
+            <Monitor className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Layar Pelanggan</span>
+          </div>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-emerald-300">
+            Dual Layar
+          </span>
+        </button>
+
         {/* Sync Status Button */}
         <button
           onClick={onTriggerSync}

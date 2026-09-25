@@ -25,6 +25,7 @@ import { ReceiptModal } from "../components/ReceiptModal";
 import { QuickAddModal } from "../components/QuickAddModal";
 import { BarcodeSimulatorModal } from "../components/BarcodeSimulatorModal";
 import { ConnectPhoneScannerModal } from "../components/ConnectPhoneScannerModal";
+import { sendCustomerDisplayEvent } from "../services/customerDisplaySync";
 import {
   initialProducts,
   initialSales,
@@ -591,6 +592,11 @@ export default function Home() {
             onViewSaleReceipt={(sale) => {
               setActiveReceiptSale(sale);
               setIsReceiptOpen(true);
+              sendCustomerDisplayEvent({
+                type: "SALE_COMPLETED",
+                sale,
+                timestamp: Date.now(),
+              });
             }}
             onSyncAllSales={handleTriggerSync}
             isSyncing={isSyncing}
@@ -602,8 +608,17 @@ export default function Home() {
       <ReceiptModal
         sale={activeReceiptSale}
         isOpen={isReceiptOpen}
-        onClose={() => setIsReceiptOpen(false)}
-        onNewTransaction={() => setIsReceiptOpen(false)}
+        onClose={() => {
+          setIsReceiptOpen(false);
+          // Jangan langsung reset layar pelanggan agar pembeli tetap bisa men-scan QR code di layar kedua
+        }}
+        onNewTransaction={() => {
+          setIsReceiptOpen(false);
+          sendCustomerDisplayEvent({
+            type: "STANDBY",
+            timestamp: Date.now(),
+          });
+        }}
       />
 
       <QuickAddModal

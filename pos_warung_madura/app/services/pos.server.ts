@@ -142,6 +142,20 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
 
     // 2. Simpan Sale Items & Ledger Mutasi Keluar
     for (const item of sale.items) {
+      // Pastikan produk ada di tabel products agar tidak melanggar foreign key constraint
+      const [prodCheck] = await connection.execute<RowDataPacket[]>(
+        `SELECT id FROM products WHERE id = ?`,
+        [item.productId]
+      );
+
+      if (prodCheck.length === 0) {
+        await connection.execute(`
+          INSERT INTO products (id, name, category, base_unit, min_stock_alert, is_active)
+          VALUES (?, ?, 'Kebutuhan Harian', ?, 10, TRUE)
+          ON DUPLICATE KEY UPDATE name = VALUES(name)
+        `, [item.productId, item.productName, item.unitName || "pcs"]);
+      }
+
       const itemId = `sitem-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       await connection.execute(`
         INSERT INTO sale_items (
@@ -187,6 +201,9 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
   } finally {
     connection.release();
   }
+
+  // Coba kirimkan snapshot transaksi ke Invoice Publik secara background (non-blocking)
+  pushSaleToPublicInvoice(sale).catch(() => {});
 }
 
 /**
@@ -452,16 +469,126 @@ export async function createProductWithUnits(product: Product): Promise<void> {
   }
 }
 
+const SYNC_API_URL = process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync";
+const SYNC_SECRET_KEY = process.env.SYNC_SECRET_KEY || "warung_madura_sync_secret_2026";
+
 /**
- * Menandai transaksi berstatus pending menjadi synced
+ * Mengirimkan snapshot satu invoice ke server Invoice Publik (Supabase Cloud API)
+ */
+export async function pushSaleToPublicInvoice(sale: Sale): Promise<boolean> {
+  try {
+    const payload = {
+      secretKey: SYNC_SECRET_KEY,
+      invoice: {
+        id: sale.invoiceCode,
+        storeName: "Warung Madura Berkah",
+        storeAddress: "Jl. Raya Warung Madura No. 24, Buka 24 Jam Non-Stop",
+        totalAmount: sale.totalAmount,
+        paidAmount: sale.paidAmount,
+        changeAmount: sale.changeAmount,
+        paymentMethod: sale.paymentMethod,
+        cashierName: sale.cashierName,
+        createdAt: new Date().toISOString(),
+        items: sale.items.map((it) => ({
+          productName: it.productName,
+          unitName: it.unitName,
+          qty: it.qty,
+          price: it.price,
+          subtotal: it.subtotal,
+        })),
+      },
+    };
+
+    const res = await fetch(SYNC_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-sync-secret": SYNC_SECRET_KEY,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok) {
+        await query(
+          `UPDATE sales SET sync_status = 'synced', synced_at = NOW() WHERE id = ?`,
+          [sale.id]
+        );
+        return true;
+      }
+    }
+  } catch (err: any) {
+    // Mode offline normal: jika server cloud tidak dapat dihubungi, transaksi tetap aman di MySQL
+    console.log("[Sync Cloud POS] Transaksi tersimpan lokal (akan disinkronkan saat online):", err.message);
+  }
+  return false;
+}
+
+/**
+ * Menyinkronkan seluruh transaksi berstatus pending ke server Invoice Publik
  */
 export async function syncSalesInDb(): Promise<number> {
-  const result = await query<ResultSetHeader>(`
-    UPDATE sales 
-    SET sync_status = 'synced', synced_at = NOW() 
+  const pendingSales = await query<RowDataPacket[]>(`
+    SELECT 
+      id, invoice_code AS invoiceCode, total_amount AS totalAmount,
+      paid_amount AS paidAmount, change_amount AS changeAmount,
+      payment_method AS paymentMethod, cashier_name AS cashierName,
+      sync_status AS syncStatus,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS timestamp
+    FROM sales
     WHERE sync_status = 'pending'
+    ORDER BY created_at ASC
+    LIMIT 50
   `);
-  return result.affectedRows;
+
+  if (pendingSales.length === 0) return 0;
+
+  const placeholders = pendingSales.map(() => "?").join(",");
+  const itemRows = await query<RowDataPacket[]>(`
+    SELECT 
+      sale_id AS saleId, product_id AS productId,
+      snapshot_product_name AS productName, snapshot_unit_name AS unitName,
+      conversion_ratio AS conversionRatio, price, quantity AS qty, subtotal
+    FROM sale_items
+    WHERE sale_id IN (${placeholders})
+  `, pendingSales.map((s) => s.id));
+
+  let syncedCount = 0;
+
+  for (const s of pendingSales) {
+    const items = itemRows
+      .filter((it) => it.saleId === s.id)
+      .map((it) => ({
+        productId: it.productId,
+        productName: it.productName,
+        unitName: it.unitName,
+        conversionRatio: Number(it.conversionRatio),
+        price: Number(it.price),
+        qty: Number(it.qty),
+        subtotal: Number(it.subtotal),
+      }));
+
+    const saleObj: Sale = {
+      id: s.id,
+      invoiceCode: s.invoiceCode,
+      totalAmount: Number(s.totalAmount),
+      paidAmount: Number(s.paidAmount),
+      changeAmount: Number(s.changeAmount),
+      paymentMethod: s.paymentMethod,
+      cashierName: s.cashierName,
+      syncStatus: s.syncStatus,
+      timestamp: s.timestamp,
+      items,
+    };
+
+    const isSuccess = await pushSaleToPublicInvoice(saleObj);
+    if (isSuccess) {
+      syncedCount++;
+    }
+  }
+
+  return syncedCount;
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   Store,
   Clock,
   Sparkles,
+  Monitor,
 } from "lucide-react";
 
 interface NavbarProps {
@@ -170,6 +171,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Simulasi Barcode</span>
+            </button>
+
+            {/* Layar Pelanggan (Customer Facing Dual Screen) */}
+            <button
+              onClick={() => window.open("/display", "_blank", "width=1200,height=800")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/60 font-medium text-xs transition cursor-pointer"
+              title="Buka Layar Pelanggan (Layar Kedua / Dual Monitor)"
+            >
+              <Monitor className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden md:inline">Layar Pelanggan</span>
             </button>
           </div>
         </div>
