@@ -20,6 +20,17 @@ export interface PublicInvoice {
   createdAt: string;
   items: PublicInvoiceItem[];
   isDemoMock?: boolean;
+  retentionHours?: number;
+  expiresAt?: string;
+  remainingMinutes?: number;
+  isExpired?: boolean;
+}
+
+export interface InvoiceQueryResult {
+  invoice: PublicInvoice | null;
+  status: "found" | "not_found" | "expired" | "invalid_code";
+  message?: string;
+  retentionHours: number;
 }
 
 export interface SyncPayload {

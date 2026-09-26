@@ -49,8 +49,8 @@ function scannerWebSocketPlugin(): Plugin {
 
 export default defineConfig({
   server: {
-    host: "0.0.0.0",
-    port: 5174,
+    host: process.env.HOST || "0.0.0.0",
+    port: Number(process.env.PORT) || 5174,
   },
   plugins: [
     tailwindcss(),

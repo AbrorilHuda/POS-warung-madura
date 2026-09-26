@@ -23,14 +23,27 @@ export function meta() {
 
 export default function Home() {
   const [invoiceCode, setInvoiceCode] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const navigate = useNavigate();
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = invoiceCode.trim().toUpperCase();
-    if (clean) {
-      navigate(`/invoice/${clean}`);
+
+    if (!clean) {
+      setErrorMessage("Nomor faktur tidak boleh kosong.");
+      return;
     }
+
+    // Validasi alfanumerik, tanda hubung, garis bawah (3-50 karakter)
+    const validFormat = /^[A-Za-z0-9_-]{3,50}$/;
+    if (!validFormat.test(clean)) {
+      setErrorMessage("Format nomor faktur tidak valid. Gunakan kombinasi huruf, angka, atau tanda hubung (-).");
+      return;
+    }
+
+    setErrorMessage("");
+    navigate(`/invoice/${clean}`);
   };
 
   return (
@@ -61,34 +74,46 @@ export default function Home() {
               <input
                 type="text"
                 value={invoiceCode}
-                onChange={(e) => setInvoiceCode(e.target.value)}
+                onChange={(e) => {
+                  setInvoiceCode(e.target.value);
+                  if (errorMessage) setErrorMessage("");
+                }}
+                maxLength={50}
                 placeholder="Contoh: WM01-000141"
-                className="w-full pl-3.5 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 font-mono text-sm uppercase focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900 transition"
+                className={`w-full pl-3.5 pr-10 py-3 bg-slate-50 border rounded-xl text-slate-900 placeholder-slate-400 font-mono text-sm uppercase focus:bg-white focus:outline-none focus:ring-2 transition ${
+                  errorMessage
+                    ? "border-rose-400 focus:ring-rose-500"
+                    : "border-slate-200 focus:ring-slate-900"
+                }`}
               />
               <button
                 type="submit"
                 className="absolute right-2 p-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white cursor-pointer transition"
+                title="Cari Struk"
               >
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-[11px] text-slate-400">
-              Ketik kode invoice yang tertera pada bagian bawah struk fisik Anda.
-            </p>
+
+            {errorMessage ? (
+              <p className="text-[11px] text-rose-600 font-medium">
+                {errorMessage}
+              </p>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                Ketik nomor faktur yang tertera pada bagian bawah struk fisik atau scan QR.
+              </p>
+            )}
           </form>
 
-          {/* Quick Demo Pill */}
-          <div className="pt-3 border-t border-slate-100">
-            <span className="text-[11px] text-slate-400 font-semibold block mb-1.5">
-              Coba Lihat Contoh Nota:
-            </span>
-            <Link
-              to="/invoice/WM01-000141"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-mono font-semibold text-slate-800 transition"
-            >
-              <span>WM01-000141</span>
-              <ExternalLink className="w-3 h-3 text-slate-400" />
-            </Link>
+          {/* Warning Retensi 12 Jam */}
+          <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-[11px] text-amber-900 space-y-1">
+            <div className="font-bold flex items-center gap-1.5 text-amber-800">
+              <span>⚠️ Kebijakan Akses Struk (12 Jam)</span>
+            </div>
+            <p className="text-amber-700/90 leading-relaxed text-[11px]">
+              Demi menjaga privasi pelanggan, data faktur belanja online otomatis dihapus dari server dalam <strong>12 jam</strong> sejak waktu pembelian.
+            </p>
           </div>
         </div>
 

@@ -14,9 +14,9 @@ const dbConfig = {
   password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "pos_warung_madura",
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: Number(process.env.DB_CONNECTION_LIMIT) || 10,
   queueLimit: 0,
-  timezone: "+07:00", // Waktu Indonesia Barat (WIB)
+  timezone: process.env.DB_TIMEZONE || "+07:00", // Waktu Indonesia Barat (WIB)
 };
 
 if (process.env.NODE_ENV === "production") {

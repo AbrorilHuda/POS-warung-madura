@@ -7,6 +7,7 @@ import {
   BarChart3,
   CloudCheck,
   CloudUpload,
+  CloudOff,
   RefreshCw,
   Clock,
   Wifi,
@@ -14,6 +15,7 @@ import {
   Smartphone,
   Monitor,
 } from "lucide-react";
+import type { StoreConfig } from "../services/pos.server";
 
 interface SidebarProps {
   activeTab: "kasir" | "katalog" | "kulakan" | "opname" | "laporan";
@@ -25,6 +27,9 @@ interface SidebarProps {
   isPhoneConnected?: boolean;
   dbConnected?: boolean;
   dbMessage?: string;
+  cloudConnected?: boolean;
+  cloudMessage?: string;
+  storeConfig?: StoreConfig;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -37,6 +42,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isPhoneConnected = false,
   dbConnected = true,
   dbMessage,
+  cloudConnected = false,
+  cloudMessage,
+  storeConfig,
 }) => {
   const [time, setTime] = useState<string>("");
 
@@ -70,20 +78,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold text-sm tracking-wider">
-              WM
+              {storeConfig?.storeCode?.slice(0, 2) || "WM"}
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h1 className="font-bold text-slate-900 text-sm tracking-tight leading-tight">
-                  Warung Madura
+                <h1 className="font-bold text-slate-900 text-sm tracking-tight leading-tight truncate max-w-[130px]" title={storeConfig?.storeName}>
+                  {storeConfig?.storeName || "Warung Madura"}
                 </h1>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold border border-slate-200">
-                  WM-01
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold border border-slate-200 shrink-0">
+                  {storeConfig?.storeCode || "WM-01"}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
                 <span className={`w-1.5 h-1.5 rounded-full ${dbConnected ? "bg-emerald-500" : "bg-amber-500"}`}></span>
-                <span>{dbConnected ? "MySQL Terhubung" : "MySQL Offline"}</span> &bull; Cak Mat
+                <span>{dbConnected ? "MySQL Terhubung" : "MySQL Offline"}</span> &bull; {storeConfig?.cashierName || "Cak Mat"}
               </p>
             </div>
           </div>
@@ -144,32 +152,65 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           onClick={onTriggerSync}
           disabled={isSyncing}
-          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border transition ${pendingSyncCount > 0
-              ? "bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100"
-              : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-            }`}
+          title={
+            isSyncing
+              ? "Sedang menyinkronkan transaksi ke cloud..."
+              : pendingSyncCount > 0
+                ? cloudConnected
+                  ? `${pendingSyncCount} transaksi tertunda. Klik untuk menyinkronkan ke cloud.`
+                  : `${pendingSyncCount} transaksi tertunda. Server cloud offline (jalankan invoice_publik di port 5175).`
+                : cloudConnected
+                  ? "Semua transaksi tersinkron ke cloud"
+                  : "Server invoice publik offline (port 5175 belum aktif)"
+          }
+          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border transition cursor-pointer ${
+            pendingSyncCount > 0
+              ? cloudConnected
+                ? "bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100"
+                : "bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100"
+              : cloudConnected
+                ? "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+          }`}
         >
           <div className="flex items-center gap-2">
             {isSyncing ? (
               <RefreshCw className="w-3.5 h-3.5 text-amber-600 animate-spin" />
             ) : pendingSyncCount > 0 ? (
-              <CloudUpload className="w-3.5 h-3.5 text-amber-600" />
-            ) : (
+              cloudConnected ? (
+                <CloudUpload className="w-3.5 h-3.5 text-amber-600" />
+              ) : (
+                <CloudOff className="w-3.5 h-3.5 text-rose-600" />
+              )
+            ) : cloudConnected ? (
               <CloudCheck className="w-3.5 h-3.5 text-emerald-600" />
+            ) : (
+              <CloudOff className="w-3.5 h-3.5 text-slate-400" />
             )}
             <span className="text-[11px] font-semibold">
               {isSyncing
                 ? "Menyinkron..."
                 : pendingSyncCount > 0
-                  ? `${pendingSyncCount} Antrean Sync`
-                  : "Cloud Tersinkron"}
+                  ? cloudConnected
+                    ? `${pendingSyncCount} Antrean Sync`
+                    : `${pendingSyncCount} Antrean (Offline)`
+                  : cloudConnected
+                    ? "Cloud Tersinkron"
+                    : "Cloud Offline"}
             </span>
           </div>
           <span className="text-[10px] text-slate-400 font-mono">
-            {pendingSyncCount > 0 ? "Klik Sync" : "OK"}
+            {isSyncing
+              ? "..."
+              : pendingSyncCount > 0
+                ? cloudConnected
+                  ? "Klik Sync"
+                  : "Port 5175"
+                : cloudConnected
+                  ? "OK"
+                  : "Off"}
           </span>
         </button>
-
 
         {/* Wireless HP Scanner Button (PRD F12) */}
         {onOpenPhoneScannerModal && (
@@ -200,10 +241,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Clock className="w-3 h-3 text-slate-400" />
             <span>{time || "00:00"} WIB</span>
           </div>
-          <span className={`${dbConnected ? "text-emerald-600" : "text-amber-600"} font-medium flex items-center gap-1`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${dbConnected ? "bg-emerald-500" : "bg-amber-500"}`}></span>
-            {dbConnected ? "MySQL Lokal" : "Offline Memori"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className={`${dbConnected ? "text-emerald-600" : "text-amber-600"} font-medium flex items-center gap-1`}
+              title={dbConnected ? "MySQL lokal terhubung" : "MySQL offline"}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${dbConnected ? "bg-emerald-500" : "bg-amber-500"}`}></span>
+              <span>MySQL</span>
+            </span>
+            <span className="text-slate-300">&bull;</span>
+            <span
+              className={`${cloudConnected ? "text-emerald-600" : "text-slate-400"} font-medium flex items-center gap-1`}
+              title={cloudConnected ? "Cloud Sync API aktif (port 5175)" : "Cloud Sync offline (port 5175)"}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${cloudConnected ? "bg-emerald-500" : "bg-slate-300"}`}></span>
+              <span>Cloud</span>
+            </span>
+          </div>
         </div>
       </div>
     </aside>

@@ -1,18 +1,34 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { saveInvoiceSnapshot, isSupabaseConnected } from "../services/supabase.server";
+import {
+  saveInvoiceSnapshot,
+  isSupabaseConnected,
+  checkSupabaseStatus,
+  cleanupExpiredInvoices,
+} from "../services/supabase.server";
 import type { SyncPayload } from "../types/invoice";
 
-const EXPECTED_SECRET = process.env.SYNC_SECRET_KEY || "warung_madura_sync_secret_2026";
-
 /**
- * GET /api/sync - Health check status koneksi cloud
+ * GET /api/sync - Health check status koneksi cloud, retensi, & trigger pembersihan
  */
 export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const doCleanup = url.searchParams.get("cleanup") === "true";
+
+  let cleanupResult = null;
+  if (doCleanup) {
+    cleanupResult = await cleanupExpiredInvoices();
+  }
+
+  const supabaseStatus = await checkSupabaseStatus();
+  const retentionHours = Number(process.env.INVOICE_RETENTION_HOURS) || 12;
+
   return Response.json({
     ok: true,
     service: "POS Warung Madura — Cloud Invoice Sync API",
     status: "online",
-    supabaseConnected: isSupabaseConnected(),
+    retentionHours,
+    supabase: supabaseStatus,
+    cleanup: cleanupResult,
     timestamp: new Date().toISOString(),
   });
 }
@@ -33,8 +49,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const authHeader = request.headers.get("x-sync-secret") || "";
     const body = (await request.json()) as SyncPayload;
 
+    const expectedSecret = process.env.SYNC_SECRET_KEY || "warung_madura_sync_secret_2026";
     const providedSecret = body.secretKey || authHeader;
-    if (providedSecret !== EXPECTED_SECRET) {
+    if (providedSecret !== expectedSecret) {
       return Response.json(
         { ok: false, error: "Autentikasi gagal: Secret Key tidak cocok" },
         { status: 401 }

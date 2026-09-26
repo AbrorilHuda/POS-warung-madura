@@ -17,9 +17,13 @@ import {
   Phone,
   MapPin,
   QrCode,
+  AlertTriangle,
+  Download,
+  AlertCircle,
+  CalendarX2,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { getInvoiceByCode, isSupabaseConnected } from "../services/supabase.server";
+import { queryInvoiceWithStatus, isSupabaseConnected } from "../services/supabase.server";
 import type { PublicInvoice } from "../types/invoice";
 
 export function meta({ data }: { data?: { invoice: PublicInvoice | null; invoiceCode: string } }) {
@@ -41,18 +45,22 @@ export function meta({ data }: { data?: { invoice: PublicInvoice | null; invoice
 
 export async function loader({ params }: LoaderFunctionArgs) {
   const invoiceCode = params.invoiceCode || "";
-  const invoice = await getInvoiceByCode(invoiceCode);
+  const queryResult = await queryInvoiceWithStatus(invoiceCode);
   const supabaseConnected = isSupabaseConnected();
 
   return {
-    invoice,
+    invoice: queryResult.invoice,
+    status: queryResult.status,
+    message: queryResult.message,
+    retentionHours: queryResult.retentionHours,
     invoiceCode,
     supabaseConnected,
   };
 }
 
 export default function PublicInvoicePage() {
-  const { invoice, invoiceCode, supabaseConnected } = useLoaderData<typeof loader>();
+  const { invoice, status, message, retentionHours, invoiceCode, supabaseConnected } =
+    useLoaderData<typeof loader>();
   const [copied, setCopied] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -78,13 +86,13 @@ export default function PublicInvoicePage() {
           url: currentUrl,
         });
         return;
-      } catch (e) { }
+      } catch (e) {}
     }
 
     // Fallback share ke WhatsApp
     if (invoice) {
       const waText = encodeURIComponent(
-        `*STRUK BELANJA RESMI*\n${invoice.storeName}\nNo. Invoice: ${invoice.id}\nTotal: Rp ${invoice.totalAmount.toLocaleString("id-ID")}\nLihat struk digital: ${currentUrl}`
+        `*STRUK BELANJA RESMI*\n${invoice.storeName}\nNo. Invoice: ${invoice.id}\nTotal: Rp ${invoice.totalAmount.toLocaleString("id-ID")}\nLihat struk digital (berlaku ${retentionHours} jam): ${currentUrl}`
       );
       window.open(`https://wa.me/?text=${waText}`, "_blank");
     }
@@ -98,9 +106,116 @@ export default function PublicInvoicePage() {
   };
 
   // =========================================================================
-  // JIKA INVOICE BELUM TERSEDIA (BELUM TERSINKRON DARI LAPTOP KASIR)
+  // 1. KASUS: NOMOR FAKTUR TIDAK VALID (KEAMANAN INPUT)
   // =========================================================================
-  if (!invoice) {
+  if (status === "invalid_code") {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col justify-between p-4 sm:p-6 text-slate-900 font-sans">
+        <div className="max-w-md w-full mx-auto my-auto">
+          <div className="mb-4">
+            <Link
+              to="/"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Kembali ke Beranda</span>
+            </Link>
+          </div>
+
+          <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 text-center space-y-5">
+            <div className="w-16 h-16 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
+              <AlertCircle className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">
+                Nomor Faktur Tidak Valid
+              </h2>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                Nomor faktur <span className="font-mono font-semibold text-slate-800 break-all">{invoiceCode}</span> tidak sesuai format sistem. Gunakan kombinasi huruf, angka, dan tanda hubung (misal: <span className="font-mono font-bold">WM01-000141</span>).
+              </p>
+            </div>
+
+            <Link
+              to="/"
+              className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+            >
+              <span>Periksa Nomor Faktur Lain</span>
+            </Link>
+          </div>
+        </div>
+
+        <footer className="text-center text-[11px] text-slate-400 py-4">
+          POS Warung Madura © 2026 — Keamanan Data Pelanggan
+        </footer>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // 2. KASUS: INVOICE SUDAH KEDALUWARSA (LEWAT DARI 12 JAM)
+  // =========================================================================
+  if (status === "expired") {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col justify-between p-4 sm:p-6 text-slate-900 font-sans">
+        <div className="max-w-md w-full mx-auto my-auto">
+          <div className="mb-4 flex items-center justify-between">
+            <Link
+              to="/"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Kembali</span>
+            </Link>
+            <span className="text-[11px] font-mono text-slate-400 bg-white px-2.5 py-1 rounded-full border border-slate-200">
+              {invoiceCode}
+            </span>
+          </div>
+
+          <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 text-center space-y-5">
+            <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200">
+              <CalendarX2 className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">
+                Struk Belanja Telah Kedaluwarsa
+              </h2>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                Sesuai kebijakan keamanan & privasi data warung, struk digital online untuk transaksi <span className="font-mono font-semibold text-slate-800">{invoiceCode}</span> otomatis <strong>dihapus setelah {retentionHours} jam</strong> dari waktu pembelian.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-left text-xs space-y-1.5 text-amber-900">
+              <div className="font-bold flex items-center gap-1.5 text-amber-800">
+                <Store className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>Butuh Salinan Struk?</span>
+              </div>
+              <p className="text-[11px] text-amber-800/90 leading-relaxed">
+                Jika Anda memerlukan bukti transaksi fisik untuk keperluan arsip atau pembukuan, silakan hubungi kasir warung di tempat transaksi Anda.
+              </p>
+            </div>
+
+            <Link
+              to="/"
+              className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+            >
+              <span>Kembali ke Halaman Utama</span>
+            </Link>
+          </div>
+        </div>
+
+        <footer className="text-center text-[11px] text-slate-400 py-4">
+          POS Warung Madura © 2026 — Kebijakan Retensi Data 12 Jam
+        </footer>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // 3. KASUS: INVOICE BELUM TERSEDIA (BELUM TERSINKRON DARI LAPTOP KASIR)
+  // =========================================================================
+  if (!invoice || status === "not_found") {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col justify-between p-4 sm:p-6 text-slate-900 font-sans">
         <div className="max-w-md w-full mx-auto my-auto">
@@ -161,8 +276,11 @@ export default function PublicInvoicePage() {
   }
 
   // =========================================================================
-  // TAMPILAN INVOICE DIGITAL RESMI (MOBILE FIRST, MODERN THERMAL-HYBRID)
+  // 4. TAMPILAN INVOICE DIGITAL RESMI (MOBILE FIRST, MODERN THERMAL-HYBRID)
   // =========================================================================
+  const remainingHours = invoice.remainingMinutes ? Math.floor(invoice.remainingMinutes / 60) : 0;
+  const remainingMins = invoice.remainingMinutes ? invoice.remainingMinutes % 60 : 0;
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col justify-between p-3 sm:p-6 text-slate-900 font-sans print:p-0 print:bg-white">
       {/* Top Navbar Actions */}
@@ -178,11 +296,11 @@ export default function PublicInvoicePage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => window.print()}
-            className="p-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-semibold transition cursor-pointer shadow-2xs flex items-center gap-1"
-            title="Cetak Struk"
+            className="p-2 sm:px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs flex items-center gap-1.5"
+            title="Unduh / Cetak Struk (Simpan PDF)"
           >
-            <Printer className="w-4 h-4" />
-            <span className="hidden sm:inline">Cetak</span>
+            <Download className="w-4 h-4" />
+            <span>Unduh / Cetak</span>
           </button>
           <button
             onClick={handleShare}
@@ -197,6 +315,39 @@ export default function PublicInvoicePage() {
 
       {/* Main Digital Receipt Card */}
       <div className="max-w-md w-full mx-auto bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden print:border-none print:shadow-none print:rounded-none">
+        {/* Banner Peringatan Retensi 12 Jam & Ajakan Unduh */}
+        <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/15 to-orange-500/10 border-b border-amber-200 p-4 text-slate-800 print:hidden">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-1 flex-wrap">
+                <span className="text-xs font-bold text-amber-950 uppercase tracking-wide">
+                  Penting: Segera Simpan / Unduh Faktur Ini!
+                </span>
+                {invoice.remainingMinutes !== undefined && (
+                  <span className="text-[10px] font-mono font-bold bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full">
+                    Sisa {remainingHours}j {remainingMins}m
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-amber-900/90 mt-1 leading-relaxed">
+                Kami menghapus data faktur digital dari server dalam <strong>{invoice.retentionHours || 12} jam</strong> sejak pembelian demi menjaga privasi belanjaan Anda.
+              </p>
+              <div className="mt-2.5">
+                <button
+                  onClick={() => window.print()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh Sekarang (Simpan PDF / Cetak)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Header Warung */}
         <div className="bg-gradient-to-b from-slate-900 to-slate-950 text-white p-6 text-center relative overflow-hidden">
           <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 text-white flex items-center justify-center mx-auto mb-3 backdrop-blur-xs">

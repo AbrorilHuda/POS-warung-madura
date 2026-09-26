@@ -202,8 +202,12 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
     connection.release();
   }
 
-  // Coba kirimkan snapshot transaksi ke Invoice Publik secara background (non-blocking)
-  pushSaleToPublicInvoice(sale).catch(() => {});
+  // Coba kirimkan snapshot transaksi ke Invoice Publik (non-blocking jika offline)
+  try {
+    await pushSaleToPublicInvoice(sale);
+  } catch {
+    // Mode offline normal: jika cloud tidak aktif, transaksi tetap tersimpan aman di MySQL lokal
+  }
 }
 
 /**
@@ -472,22 +476,78 @@ export async function createProductWithUnits(product: Product): Promise<void> {
 const SYNC_API_URL = process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync";
 const SYNC_SECRET_KEY = process.env.SYNC_SECRET_KEY || "warung_madura_sync_secret_2026";
 
+export interface StoreConfig {
+  storeCode: string;
+  storeName: string;
+  storeTagline: string;
+  storeAddress: string;
+  storeCity: string;
+  cashierName: string;
+  publicInvoiceBaseUrl: string;
+}
+
+/**
+ * Membaca konfigurasi profil toko / warung dari environment variable (.env)
+ */
+export function getStoreConfig(): StoreConfig {
+  return {
+    storeCode: process.env.STORE_CODE || "WM01",
+    storeName: process.env.STORE_NAME || "Warung Madura Berkah",
+    storeTagline: process.env.STORE_TAGLINE || "Buka 24 Jam Non-Stop",
+    storeAddress: process.env.STORE_ADDRESS || "Jl. Raya Warung Madura No. 24, Buka 24 Jam Non-Stop",
+    storeCity: process.env.STORE_CITY || "Sumenep",
+    cashierName: process.env.CASHIER_DEFAULT_NAME || "Cak Mat",
+    publicInvoiceBaseUrl: process.env.PUBLIC_INVOICE_BASE_URL || "",
+  };
+}
+
+/**
+ * Mengecek ketersediaan server Cloud Invoice Sync
+ */
+export async function testCloudConnection(): Promise<{
+  ok: boolean;
+  message: string;
+  supabaseConnected?: boolean;
+}> {
+  try {
+    const res = await fetch(SYNC_API_URL, {
+      method: "GET",
+      signal: AbortSignal.timeout(1500),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        ok: true,
+        message: "Server Cloud Terhubung",
+        supabaseConnected: data.supabaseConnected,
+      };
+    }
+    return { ok: false, message: `Server Cloud respon ${res.status}` };
+  } catch (err: any) {
+    return {
+      ok: false,
+      message: "Server Cloud Offline (jalankan invoice_publik di port 5175)",
+    };
+  }
+}
+
 /**
  * Mengirimkan snapshot satu invoice ke server Invoice Publik (Supabase Cloud API)
  */
 export async function pushSaleToPublicInvoice(sale: Sale): Promise<boolean> {
   try {
+    const storeConfig = getStoreConfig();
     const payload = {
       secretKey: SYNC_SECRET_KEY,
       invoice: {
         id: sale.invoiceCode,
-        storeName: "Warung Madura Berkah",
-        storeAddress: "Jl. Raya Warung Madura No. 24, Buka 24 Jam Non-Stop",
+        storeName: storeConfig.storeName,
+        storeAddress: storeConfig.storeAddress,
         totalAmount: sale.totalAmount,
         paidAmount: sale.paidAmount,
         changeAmount: sale.changeAmount,
         paymentMethod: sale.paymentMethod,
-        cashierName: sale.cashierName,
+        cashierName: sale.cashierName || storeConfig.cashierName,
         createdAt: new Date().toISOString(),
         items: sale.items.map((it) => ({
           productName: it.productName,
@@ -506,6 +566,7 @@ export async function pushSaleToPublicInvoice(sale: Sale): Promise<boolean> {
         "x-sync-secret": SYNC_SECRET_KEY,
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(3000),
     });
 
     if (res.ok) {
@@ -525,10 +586,31 @@ export async function pushSaleToPublicInvoice(sale: Sale): Promise<boolean> {
   return false;
 }
 
+export interface SyncSalesResult {
+  syncedCount: number;
+  totalPending: number;
+  cloudOnline: boolean;
+  message: string;
+}
+
 /**
  * Menyinkronkan seluruh transaksi berstatus pending ke server Invoice Publik
  */
-export async function syncSalesInDb(): Promise<number> {
+export async function syncSalesInDb(): Promise<SyncSalesResult> {
+  const cloudHealth = await testCloudConnection();
+  if (!cloudHealth.ok) {
+    const pendingSales = await query<RowDataPacket[]>(`
+      SELECT COUNT(*) AS count FROM sales WHERE sync_status = 'pending'
+    `);
+    const totalPending = pendingSales[0]?.count || 0;
+    return {
+      syncedCount: 0,
+      totalPending: Number(totalPending),
+      cloudOnline: false,
+      message: "Server cloud (port 5175) belum aktif. Pastikan aplikasi invoice_publik berjalan.",
+    };
+  }
+
   const pendingSales = await query<RowDataPacket[]>(`
     SELECT 
       id, invoice_code AS invoiceCode, total_amount AS totalAmount,
@@ -542,7 +624,14 @@ export async function syncSalesInDb(): Promise<number> {
     LIMIT 50
   `);
 
-  if (pendingSales.length === 0) return 0;
+  if (pendingSales.length === 0) {
+    return {
+      syncedCount: 0,
+      totalPending: 0,
+      cloudOnline: true,
+      message: "Semua transaksi sudah tersinkron ke cloud.",
+    };
+  }
 
   const placeholders = pendingSales.map(() => "?").join(",");
   const itemRows = await query<RowDataPacket[]>(`
@@ -588,7 +677,12 @@ export async function syncSalesInDb(): Promise<number> {
     }
   }
 
-  return syncedCount;
+  return {
+    syncedCount,
+    totalPending: pendingSales.length,
+    cloudOnline: true,
+    message: `${syncedCount} dari ${pendingSales.length} transaksi berhasil disinkronkan ke cloud.`,
+  };
 }
 
 /**

@@ -26,6 +26,7 @@ import {
   listenKasirRequestState,
 } from "../services/customerDisplaySync";
 import type { Product, ProductUnit, CartItem, Sale } from "../types/pos";
+import type { StoreConfig } from "../services/pos.server";
 
 interface KasirPOSProps {
   products: Product[];
@@ -35,6 +36,7 @@ interface KasirPOSProps {
   quickScanTriggerBarcode: string | null;
   onClearQuickScanTrigger: () => void;
   nextInvoiceSeq?: number;
+  storeConfig?: StoreConfig;
 }
 
 export const KasirPOS: React.FC<KasirPOSProps> = ({
@@ -45,6 +47,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
   quickScanTriggerBarcode,
   onClearQuickScanTrigger,
   nextInvoiceSeq,
+  storeConfig,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Semua");
@@ -56,7 +59,8 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
   const paidInputRef = useRef<HTMLInputElement>(null);
   const lastCompletedSaleRef = useRef<Sale | null>(null);
 
-  const currentInvoiceCode = `WM01-${String(invoiceSeq).padStart(6, "0")}`;
+  const storePrefix = storeConfig?.storeCode || "WM01";
+  const currentInvoiceCode = `${storePrefix}-${String(invoiceSeq).padStart(6, "0")}`;
   const grandTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const changeAmount = Math.max(0, paidAmount - grandTotal);
 
@@ -312,7 +316,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
       changeAmount: paymentMethod === "Tunai" ? changeAmount : 0,
       paymentMethod: paymentMethod,
       syncStatus: "pending",
-      cashierName: "Cak Mat",
+      cashierName: storeConfig?.cashierName || "Cak Mat",
     };
 
     onRecordSale(newSale);

@@ -16,12 +16,14 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Sale } from "../types/pos";
+import type { StoreConfig } from "../services/pos.server";
 
 interface ReceiptModalProps {
   sale: Sale | null;
   isOpen: boolean;
   onClose: () => void;
   onNewTransaction: () => void;
+  storeConfig?: StoreConfig;
 }
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({
@@ -29,19 +31,23 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   isOpen,
   onClose,
   onNewTransaction,
+  storeConfig,
 }) => {
   const [viewMode, setViewMode] = useState<"barcode" | "digitalInvoice">("barcode");
   const [copied, setCopied] = useState(false);
 
   if (!isOpen || !sale) return null;
 
-  // URL invoice publik: gunakan hostname laptop (LAN IP/localhost) port 5175 agar bisa dibuka langsung dari HP
+  // URL invoice publik: prioritas PUBLIC_INVOICE_BASE_URL dari .env, fallback hostname laptop port 5175
   const host =
     typeof window !== "undefined" && window.location.hostname
       ? window.location.hostname
       : "localhost";
   const invoicePort = "5175";
-  const invoiceUrl = `http://${host}:${invoicePort}/invoice/${sale.invoiceCode}`;
+  const defaultInvoiceUrl = `http://${host}:${invoicePort}/invoice/${sale.invoiceCode}`;
+  const invoiceUrl = storeConfig?.publicInvoiceBaseUrl
+    ? `${storeConfig.publicInvoiceBaseUrl.replace(/\/$/, "")}/invoice/${sale.invoiceCode}`
+    : defaultInvoiceUrl;
 
   const handleCopyLink = () => {
     if (typeof navigator !== "undefined") {
@@ -134,13 +140,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               {/* Header Toko */}
               <div className="text-center pb-3 border-b border-dashed border-slate-300">
                 <h4 className="font-black text-sm tracking-wider uppercase text-slate-900">
-                  WARUNG MADURA BERKAH
+                  {storeConfig?.storeName || "WARUNG MADURA BERKAH"}
                 </h4>
                 <p className="text-[10px] text-slate-500 mt-0.5">
-                  Buka 24 Jam Non-Stop &bull; Sumenep
+                  {storeConfig?.storeTagline || "Buka 24 Jam Non-Stop"} &bull; {storeConfig?.storeCity || "Sumenep"}
                 </p>
                 <p className="text-[9px] text-slate-400">
-                  Jl. Raya Warung Madura No. 24
+                  {storeConfig?.storeAddress || "Jl. Raya Warung Madura No. 24"}
                 </p>
               </div>
 
@@ -196,10 +202,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </div>
 
                 <h4 className="text-base font-extrabold tracking-tight uppercase">
-                  WARUNG MADURA BERKAH
+                  {storeConfig?.storeName || "WARUNG MADURA BERKAH"}
                 </h4>
                 <p className="text-[11px] text-slate-300 mt-0.5">
-                  Jl. Raya Warung Madura No. 24, Buka 24 Jam Non-Stop
+                  {storeConfig?.storeAddress || "Jl. Raya Warung Madura No. 24, Buka 24 Jam Non-Stop"}
                 </p>
 
                 <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-[10px] font-semibold">
