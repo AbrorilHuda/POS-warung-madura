@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 if (typeof process.loadEnvFile === "function") {
   try {
     process.loadEnvFile();
-  } catch (e) {}
+  } catch (e) { }
 }
 
 async function main() {
@@ -34,7 +34,7 @@ async function main() {
   await connection.query(`USE \`${dbName}\`;`);
 
   console.log("Membaca schema.sql...");
-  const schemaPath = path.resolve(__dirname, "../schema.sql");
+  const schemaPath = path.resolve(__dirname, "../migrations/schema.sql");
   const schemaSql = fs.readFileSync(schemaPath, "utf-8");
 
   console.log("Mengeksekusi skema tabel & seed data...");

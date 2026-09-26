@@ -1,6 +1,10 @@
-# 🏪 POS Warung Madura — Sistem Kasir Modern & Struk Digital Cloud
+# 🏪 POS Warung Madura Sistem Kasir Modern & Struk Digital Cloud
 
 Aplikasi Point of Sale (POS) modern khusus operasional warung madura dan retail minimarket, dirancang untuk berjalan secara **offline-first** di laptop/PC kasir menggunakan **Electron Desktop** dengan database **MySQL Portable terisolasi**, serta terintegrasi dengan **Layanan Struk Digital Cloud (Invoice Publik)** dan **Scanner Barcode Nirkabel Kamera HP**.
+
+> 📦 **Download Installer Aplikasi Windows (.exe):**  
+> Dapatkan file installer resmi siap pakai langsung tanpa perlu setup source code di:  
+> 👉 **[Download Rilis Terbaru di GitHub Releases](https://github.com/AbrorilHuda/POS-warung-madura/releases)**
 
 ---
 
@@ -155,8 +159,12 @@ npm run electron:build
 ```
 Installer akan dihasilkan di:
 ```
-pos_warung_madura/release/POS Warung Madura Setup 1.0.0.exe
+pos_warung_madura/release/POS Warung Madura Setup 1.9.0.exe
 ```
+
+> 💡 **Unduh Langsung Tanpa Build**:  
+> File installer `.exe` yang sudah siap pakai juga selalu diunggah ke:  
+> 🔗 **https://github.com/AbrorilHuda/POS-warung-madura/releases**
 
 ---
 

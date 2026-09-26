@@ -32,7 +32,7 @@ extraResources:
     to: "migrations/schema.sql"
 
 win:
-  icon: "public/icons/icon.png"
+  icon: "public/icons/icon.ico"
   target:
     - target: nsis
       arch:
@@ -44,5 +44,5 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: POS Warung Madura
-  installerIcon: "public/icons/icon.png"
-  uninstallerIcon: "public/icons/icon.png"
+  installerIcon: "public/icons/icon.ico"
+  uninstallerIcon: "public/icons/icon.ico"

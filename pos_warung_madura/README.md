@@ -2,6 +2,9 @@
 
 Aplikasi Kasir Desktop untuk Warung Madura dan Minimarket berbasis **Electron**, **React Router v8 (SSR framework mode)**, **Express HTTPS/WSS**, dan **MySQL Portable terisolasi (Port 3307)**.
 
+> 📦 **Download Installer Siap Pakai (.exe)**:  
+> [https://github.com/AbrorilHuda/POS-warung-madura/releases](https://github.com/AbrorilHuda/POS-warung-madura/releases)
+
 Untuk dokumentasi lengkap sistem, silakan baca [README.md di root repositori](../README.md).
 
 ---

@@ -15,9 +15,10 @@
     "ws:scanner": "node scripts/ws-scanner.mjs",
     "dev:all": "node scripts/dev-all.mjs",
     "build:electron": "tsc -p tsconfig.electron.json",
+    "icon:generate": "node scripts/generate-icon.mjs",
     "mysql:strip": "node scripts/strip-mysql-bloat.mjs",
     "electron:dev": "concurrently -k -s first \"npm run dev\" \"wait-on -t 30000 tcp:5174 && npm run build:electron && electron .\"",
-    "electron:build": "npm run build && npm run build:electron && node scripts/strip-mysql-bloat.mjs && electron-builder --win"
+    "electron:build": "npm run build && npm run build:electron && node scripts/generate-icon.mjs && node scripts/strip-mysql-bloat.mjs && electron-builder --win"
   },
   "dependencies": {
     "@react-router/express": "^8.4.0",
@@ -50,6 +51,7 @@
     "concurrently": "^10.0.5",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
+    "png-to-ico": "^3.0.2",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
     "vite": "^8.0.3",
