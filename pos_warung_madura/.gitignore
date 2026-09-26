@@ -6,3 +6,11 @@
 /.react-router/
 /build/
 prd.md
+/release/
+
+# MySQL portable (binary pihak ketiga, download manual sesuai resources/mysql/README.md)
+/resources/mysql/bin/
+/resources/mysql/lib/
+/resources/mysql/share/
+/resources/mysql/data/*
+!/resources/mysql/data/.gitkeep

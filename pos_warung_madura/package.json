@@ -1,7 +1,11 @@
 {
   "name": "pos_warung_madura",
+  "version": "1.9.0",
+  "description": "Aplikasi Kasir POS Warung Madura Desktop",
+  "author": "Abroril Huda",
   "private": true,
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "build": "react-router build",
     "dev": "react-router dev",
@@ -9,14 +13,21 @@
     "typecheck": "react-router typegen && tsc",
     "db:init": "node scripts/init-db.mjs",
     "ws:scanner": "node scripts/ws-scanner.mjs",
-    "dev:all": "node scripts/dev-all.mjs"
+    "dev:all": "node scripts/dev-all.mjs",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "mysql:strip": "node scripts/strip-mysql-bloat.mjs",
+    "electron:dev": "concurrently -k -s first \"npm run dev\" \"wait-on -t 30000 tcp:5174 && npm run build:electron && electron .\"",
+    "electron:build": "npm run build && npm run build:electron && node scripts/strip-mysql-bloat.mjs && electron-builder --win"
   },
   "dependencies": {
+    "@react-router/express": "^8.4.0",
     "@react-router/node": "^8.4.0",
     "@react-router/serve": "^8.4.0",
     "@types/canvas-confetti": "^1.9.0",
     "barcode-detector": "^3.2.2",
     "canvas-confetti": "^1.9.4",
+    "compression": "^1.8.2",
+    "express": "^5.2.1",
     "html5-qrcode": "^2.3.8",
     "isbot": "^5.1.36",
     "lucide-react": "^1.48.0",
@@ -25,6 +36,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^8.4.0",
+    "selfsigned": "^5.5.0",
     "ws": "^8.21.3"
   },
   "devDependencies": {
@@ -35,8 +47,12 @@
     "@types/react-dom": "^19.2.7",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "concurrently": "^10.0.5",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
-    "vite": "^8.0.3"
+    "vite": "^8.0.3",
+    "wait-on": "^9.1.0"
   }
 }

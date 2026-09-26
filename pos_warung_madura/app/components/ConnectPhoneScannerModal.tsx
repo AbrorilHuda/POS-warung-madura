@@ -33,8 +33,8 @@ export const ConnectPhoneScannerModal: React.FC<ConnectPhoneScannerModalProps> =
 
   if (!isOpen) return null;
 
-  const protocol = typeof window !== "undefined" ? window.location.protocol : "https:";
-  const port = typeof window !== "undefined" ? window.location.port : "5174";
+  const protocol = "https:";
+  const port = typeof window !== "undefined" ? window.location.port : "4000";
   const scannerUrl = `${protocol}//${activeIp}${port ? `:${port}` : ""}/scanner`;
 
   const handleCopy = () => {

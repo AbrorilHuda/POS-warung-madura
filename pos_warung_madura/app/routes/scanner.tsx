@@ -117,20 +117,22 @@ export default function MobileScanner() {
       };
     } catch (e) {}
 
-    // 2. WebSocket to Vite WSS endpoint (/ws-scanner)
+    // 2. WebSocket to Vite/Server WSS endpoint (/ws-scanner)
     const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
     const protocol = isHttps ? "wss:" : "ws:";
-    const host = typeof window !== "undefined" ? window.location.host : "localhost:5174";
+    const host = typeof window !== "undefined" ? window.location.host : "localhost:4000";
     const wsUrl = `${protocol}//${host}/ws-scanner`;
 
     let reconnectTimer: any = null;
 
     const connectWs = () => {
       try {
+        console.log(`[WebSocket Scanner] Mencoba menghubungkan ke: ${wsUrl}`);
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
-        ws.onopen = () => {
+        ws.onopen = (event) => {
+          console.log(`[WebSocket Scanner] ✅ Berhasil terhubung (onopen) ke: ${wsUrl}`);
           setWsConnected(true);
           const isAndroid = typeof navigator !== "undefined" && navigator.userAgent.includes("Android");
           const isIOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -145,6 +147,7 @@ export default function MobileScanner() {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            console.log(`[WebSocket Scanner] 📩 Pesan diterima:`, data);
             if (data.type === "SCAN_CONFIRMED") {
               setConfirmationMessage(data);
               setTimeout(() => setConfirmationMessage(null), 3500);
@@ -152,15 +155,20 @@ export default function MobileScanner() {
           } catch (e) {}
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
+          console.warn(
+            `[WebSocket Scanner] ⚠️ Terputus (onclose) — Code: ${event.code}, Reason: ${event.reason || "none"}, Clean: ${event.wasClean}`
+          );
           setWsConnected(false);
           reconnectTimer = setTimeout(connectWs, 2000);
         };
 
-        ws.onerror = () => {
+        ws.onerror = (event) => {
+          console.error(`[WebSocket Scanner] ❌ Error koneksi (onerror):`, event);
           setWsConnected(false);
         };
       } catch (e) {
+        console.error(`[WebSocket Scanner] ❌ Exception WebSocket:`, e);
         setWsConnected(false);
       }
     };

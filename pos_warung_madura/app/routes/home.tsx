@@ -381,21 +381,24 @@ export default function Home() {
     // 2. WebSocket connection (supports WSS via Vite /ws-scanner or fallback port 3001)
     const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
     const wsProtocol = isHttps ? "wss:" : "ws:";
-    const host = typeof window !== "undefined" ? window.location.host : "localhost:5174";
+    const host = typeof window !== "undefined" ? window.location.host : "localhost:4000";
     const wsUrl = `${wsProtocol}//${host}/ws-scanner`;
 
     const connectWs = () => {
       try {
+        console.log(`[POS Laptop WebSocket] Menghubungkan ke: ${wsUrl}`);
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {
+          console.log(`[POS Laptop WebSocket] ✅ Terhubung ke: ${wsUrl}`);
           ws.send(JSON.stringify({ type: "LAPTOP_READY" }));
         };
 
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            console.log(`[POS Laptop WebSocket] 📩 Pesan:`, data);
             if (data.type === "DEVICE_CONNECTED") {
               setIsPhoneConnected(true);
               setPhoneDeviceName(data.deviceName || "HP Kasir");
@@ -407,11 +410,18 @@ export default function Home() {
           } catch (e) {}
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
+          console.warn(`[POS Laptop WebSocket] ⚠️ Terputus: code=${event.code}`);
           setIsPhoneConnected(false);
           setTimeout(connectWs, 2500);
         };
+
+        ws.onerror = (event) => {
+          console.error(`[POS Laptop WebSocket] ❌ Error:`, event);
+          setIsPhoneConnected(false);
+        };
       } catch (e) {
+        console.error(`[POS Laptop WebSocket] ❌ Exception:`, e);
         setIsPhoneConnected(false);
       }
     };

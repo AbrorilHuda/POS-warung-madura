@@ -1,0 +1,48 @@
+appId: com.warungmadura.pos
+productName: POS Warung Madura
+copyright: Copyright © 2026 Abroril Huda
+
+directories:
+  output: release
+  buildResources: resources
+
+asar: false
+
+files:
+  - "build/**/*"
+  - "dist-electron/**/*"
+  - "server/**/*"
+  - "migrations/**/*"
+  - "public/icons/**/*"
+  - "package.json"
+  - "!resources/**/*"
+
+extraResources:
+  - from: "resources/mysql/bin"
+    to: "mysql/bin"
+    filter:
+      - "!**/*.pdb"
+  - from: "resources/mysql/lib"
+    to: "mysql/lib"
+    filter:
+      - "!**/*.pdb"
+  - from: "resources/mysql/share"
+    to: "mysql/share"
+  - from: "migrations/schema.sql"
+    to: "migrations/schema.sql"
+
+win:
+  icon: "public/icons/icon.png"
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: POS Warung Madura
+  installerIcon: "public/icons/icon.png"
+  uninstallerIcon: "public/icons/icon.png"
