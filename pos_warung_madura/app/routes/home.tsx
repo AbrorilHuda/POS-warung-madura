@@ -15,6 +15,9 @@ import {
   createStockOpnameAdjustment,
   syncSalesInDb,
   testCloudConnection,
+  verifyTenantSecret,
+  saveCloudConfig,
+  disconnectCloudConfig,
   getStoreConfig,
   type StoreConfig,
 } from "../services/pos.server";
@@ -87,6 +90,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         dbMessage: dbStatus.message,
         cloudConnected: cloudStatus.ok,
         cloudMessage: cloudStatus.message,
+        cloudTenant: cloudStatus.tenant || null,
+        cloudSaas: cloudStatus.saas || null,
         products: products,
         sales: sales,
         stockMovements: stockMovements,
@@ -100,6 +105,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         dbMessage: err.message,
         cloudConnected: cloudStatus.ok,
         cloudMessage: cloudStatus.message,
+        cloudTenant: cloudStatus.tenant || null,
+        cloudSaas: cloudStatus.saas || null,
         products: [] as Product[],
         sales: [] as Sale[],
         stockMovements: [] as StockMovement[],
@@ -114,6 +121,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     dbMessage: dbStatus.message,
     cloudConnected: cloudStatus.ok,
     cloudMessage: cloudStatus.message,
+    cloudTenant: cloudStatus.tenant || null,
+    cloudSaas: cloudStatus.saas || null,
     products: [] as Product[],
     sales: [] as Sale[],
     stockMovements: [] as StockMovement[],
@@ -182,10 +191,51 @@ export async function action({ request }: ActionFunctionArgs) {
       };
     }
 
-    return { ok: false, error: "Aksi tidak dikenal" };
+    if (intent === "verify_cloud_secret") {
+      const secret = (formData.get("secret_key") as string) || "";
+      const apiUrl = (formData.get("api_url") as string) || undefined;
+      const res = await verifyTenantSecret(secret, apiUrl);
+      return {
+        intent,
+        ...res,
+      };
+    }
+
+    if (intent === "save_cloud_config") {
+      const syncSecretKey = (formData.get("sync_secret_key") as string) ?? undefined;
+      const syncApiUrl = (formData.get("sync_api_url") as string) ?? undefined;
+      const storeCode = (formData.get("store_code") as string) ?? undefined;
+      const storeSlug = (formData.get("store_slug") as string) ?? undefined;
+      const storeName = (formData.get("store_name") as string) ?? undefined;
+      const publicBaseUrl = (formData.get("public_base_url") as string) ?? undefined;
+
+      const res = await saveCloudConfig({
+        syncSecretKey,
+        syncApiUrl,
+        storeCode,
+        storeSlug,
+        storeName,
+        publicBaseUrl,
+      });
+
+      return {
+        intent,
+        ...res,
+      };
+    }
+
+    if (intent === "disconnect_cloud") {
+      const res = await disconnectCloudConfig();
+      return {
+        intent,
+        ...res,
+      };
+    }
+
+    return { ok: false, error: "Aksi tidak dikenal", intent: null };
   } catch (err: any) {
     console.error("Action error:", err);
-    return { ok: false, error: err.message };
+    return { ok: false, error: err.message, intent: null };
   }
 }
 
@@ -225,10 +275,15 @@ export default function Home() {
   } | null>(null);
 
   useEffect(() => {
-    if (actionData && actionData.intent === "sync_cloud") {
+    if (actionData && "intent" in actionData && actionData.intent === "sync_cloud") {
       setIsSyncing(false);
       const syncRes = actionData as any;
-      if (syncRes.syncedCount > 0) {
+      if (syncRes.errorDetail) {
+        setSyncToast({
+          type: "error",
+          message: syncRes.message || `Sync dihentikan: ${syncRes.errorDetail}`,
+        });
+      } else if (syncRes.syncedCount > 0) {
         setSyncToast({
           type: "success",
           message: syncRes.message || `${syncRes.syncedCount} transaksi berhasil disinkronkan ke cloud.`,
@@ -649,6 +704,7 @@ export default function Home() {
         dbMessage={loaderData.dbMessage}
         cloudConnected={loaderData.cloudConnected}
         cloudMessage={loaderData.cloudMessage}
+        cloudTenant={loaderData.cloudTenant}
         storeConfig={loaderData.storeConfig}
       />
 

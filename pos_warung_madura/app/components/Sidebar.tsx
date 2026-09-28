@@ -14,8 +14,11 @@ import {
   Store,
   Smartphone,
   Monitor,
+  Sparkles,
+  Info,
 } from "lucide-react";
-import type { StoreConfig } from "../services/pos.server";
+import type { StoreConfig, CloudTenantInfo } from "../services/pos.server";
+import { CloudSaasModal } from "./CloudSaasModal";
 
 interface SidebarProps {
   activeTab: "kasir" | "katalog" | "kulakan" | "opname" | "laporan";
@@ -29,6 +32,7 @@ interface SidebarProps {
   dbMessage?: string;
   cloudConnected?: boolean;
   cloudMessage?: string;
+  cloudTenant?: CloudTenantInfo | null;
   storeConfig?: StoreConfig;
 }
 
@@ -44,9 +48,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   dbMessage,
   cloudConnected = false,
   cloudMessage,
+  cloudTenant,
   storeConfig,
 }) => {
   const [time, setTime] = useState<string>("");
+  const [isSaasModalOpen, setIsSaasModalOpen] = useState(false);
 
   useEffect(() => {
     const updateTime = () => {
@@ -81,13 +87,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {storeConfig?.storeCode?.slice(0, 2) || "WM"}
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
-                <h1 className="font-bold text-slate-900 text-sm tracking-tight leading-tight truncate max-w-[130px]" title={storeConfig?.storeName}>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h1 className="font-bold text-slate-900 text-sm tracking-tight leading-tight truncate max-w-[110px]" title={storeConfig?.storeName}>
                   {storeConfig?.storeName || "Warung Madura"}
                 </h1>
                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold border border-slate-200 shrink-0">
                   {storeConfig?.storeCode || "WM-01"}
                 </span>
+                {cloudTenant?.valid && cloudTenant.plan === "pro" && (
+                  <button
+                    onClick={() => setIsSaasModalOpen(true)}
+                    className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs hover:bg-amber-200 cursor-pointer"
+                    title="Paket Pro SaaS Aktif — Klik untuk detail"
+                  >
+                    <Sparkles className="w-2.5 h-2.5 text-amber-600" />
+                    PRO
+                  </button>
+                )}
+                {cloudTenant?.valid && cloudTenant.plan === "free" && (
+                  <button
+                    onClick={() => setIsSaasModalOpen(true)}
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 cursor-pointer"
+                    title={`Paket Free SaaS (Sisa: ${cloudTenant.quotaRemaining}) — Klik untuk detail`}
+                  >
+                    FREE
+                  </button>
+                )}
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
                 <span className={`w-1.5 h-1.5 rounded-full ${dbConnected ? "bg-emerald-500" : "bg-amber-500"}`}></span>
@@ -148,69 +173,79 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
         </button>
 
-        {/* Sync Status Button */}
-        <button
-          onClick={onTriggerSync}
-          disabled={isSyncing}
-          title={
-            isSyncing
-              ? "Sedang menyinkronkan transaksi ke cloud..."
-              : pendingSyncCount > 0
-                ? cloudConnected
-                  ? `${pendingSyncCount} transaksi tertunda. Klik untuk menyinkronkan ke cloud.`
-                  : `${pendingSyncCount} transaksi tertunda. Server cloud offline (jalankan invoice_publik di port 5175).`
-                : cloudConnected
-                  ? "Semua transaksi tersinkron ke cloud"
-                  : "Server invoice publik offline (port 5175 belum aktif)"
-          }
-          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border transition cursor-pointer ${
-            pendingSyncCount > 0
-              ? cloudConnected
-                ? "bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100"
-                : "bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100"
-              : cloudConnected
-                ? "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {isSyncing ? (
-              <RefreshCw className="w-3.5 h-3.5 text-amber-600 animate-spin" />
-            ) : pendingSyncCount > 0 ? (
-              cloudConnected ? (
-                <CloudUpload className="w-3.5 h-3.5 text-amber-600" />
-              ) : (
-                <CloudOff className="w-3.5 h-3.5 text-rose-600" />
-              )
-            ) : cloudConnected ? (
-              <CloudCheck className="w-3.5 h-3.5 text-emerald-600" />
-            ) : (
-              <CloudOff className="w-3.5 h-3.5 text-slate-400" />
-            )}
-            <span className="text-[11px] font-semibold">
-              {isSyncing
-                ? "Menyinkron..."
+        {/* Sync Status Button with Info Trigger */}
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={onTriggerSync}
+            disabled={isSyncing}
+            title={
+              isSyncing
+                ? "Sedang menyinkronkan transaksi ke cloud..."
                 : pendingSyncCount > 0
                   ? cloudConnected
-                    ? `${pendingSyncCount} Antrean Sync`
-                    : `${pendingSyncCount} Antrean (Offline)`
+                    ? `${pendingSyncCount} transaksi tertunda. Klik untuk menyinkronkan ke cloud.`
+                    : `${pendingSyncCount} transaksi tertunda. Server cloud offline (jalankan invoice_publik di port 5175).`
                   : cloudConnected
-                    ? "Cloud Tersinkron"
-                    : "Cloud Offline"}
-            </span>
-          </div>
-          <span className="text-[10px] text-slate-400 font-mono">
-            {isSyncing
-              ? "..."
-              : pendingSyncCount > 0
+                    ? "Semua transaksi tersinkron ke cloud"
+                    : "Server invoice publik offline (port 5175 belum aktif)"
+            }
+            className={`flex-1 flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border transition cursor-pointer ${
+              pendingSyncCount > 0
                 ? cloudConnected
-                  ? "Klik Sync"
-                  : "Port 5175"
+                  ? "bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100"
+                  : "bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100"
                 : cloudConnected
-                  ? "OK"
-                  : "Off"}
-          </span>
-        </button>
+                  ? "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                  : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {isSyncing ? (
+                <RefreshCw className="w-3.5 h-3.5 text-amber-600 animate-spin" />
+              ) : pendingSyncCount > 0 ? (
+                cloudConnected ? (
+                  <CloudUpload className="w-3.5 h-3.5 text-amber-600" />
+                ) : (
+                  <CloudOff className="w-3.5 h-3.5 text-rose-600" />
+                )
+              ) : cloudConnected ? (
+                <CloudCheck className="w-3.5 h-3.5 text-emerald-600" />
+              ) : (
+                <CloudOff className="w-3.5 h-3.5 text-slate-400" />
+              )}
+              <span className="text-[11px] font-semibold truncate max-w-[95px]">
+                {isSyncing
+                  ? "Menyinkron..."
+                  : pendingSyncCount > 0
+                    ? cloudConnected
+                      ? `${pendingSyncCount} Antrean`
+                      : `${pendingSyncCount} Offline`
+                    : cloudConnected
+                      ? cloudTenant?.plan === "pro"
+                        ? "Cloud Pro"
+                        : "Cloud Sinkron"
+                      : "Cloud Off"}
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-400 font-mono">
+              {isSyncing
+                ? "..."
+                : pendingSyncCount > 0
+                  ? "Sync"
+                  : cloudConnected
+                    ? "OK"
+                    : "Off"}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setIsSaasModalOpen(true)}
+            title="Lihat status detail Cloud SaaS & Multi-Tenant"
+            className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition cursor-pointer shrink-0"
+          >
+            <Info className="w-3.5 h-3.5" />
+          </button>
+        </div>
 
         {/* Wireless HP Scanner Button (PRD F12) */}
         {onOpenPhoneScannerModal && (
@@ -260,6 +295,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Cloud SaaS Multi-Tenant Modal */}
+      <CloudSaasModal
+        isOpen={isSaasModalOpen}
+        onClose={() => setIsSaasModalOpen(false)}
+        cloudConnected={cloudConnected}
+        cloudMessage={cloudMessage}
+        cloudTenant={cloudTenant}
+        storeConfig={storeConfig}
+        pendingSyncCount={pendingSyncCount}
+        onTriggerSync={onTriggerSync}
+        isSyncing={isSyncing}
+      />
     </aside>
   );
 };

@@ -1,4 +1,3 @@
-// Pastikan file .env dimuat jika berjalan di runtime Node.js
 try {
   process.loadEnvFile?.();
 } catch { }
@@ -358,9 +357,12 @@ export async function getInvoiceByCode(invoiceCode: string): Promise<PublicInvoi
 
 /**
  * Menyimpan snapshot invoice transaksi yang dikirim oleh POS Warung
+ * store_slug dan store_code datang dari validasi tenant multi-tenant
  */
 export async function saveInvoiceSnapshot(
-  data: SyncPayload["invoice"]
+  data: SyncPayload["invoice"] & { storeSlug?: string; storeCode?: string },
+  storeSlug?: string,
+  storeCode?: string
 ): Promise<{ success: boolean; error?: string }> {
   const invoiceId = data.id || data.invoiceCode;
   if (!invoiceId || !isValidInvoiceCode(invoiceId)) {
@@ -410,7 +412,7 @@ export async function saveInvoiceSnapshot(
   // Jika Supabase aktif, simpan ke database cloud
   if (client) {
     try {
-      // 1. Upsert header invoice
+      // 1. Upsert header invoice (dengan store_slug & store_code untuk multi-tenant)
       const { error: headerErr } = await client.from("invoices").upsert({
         id: invoiceId,
         store_name: storeName,
@@ -421,6 +423,8 @@ export async function saveInvoiceSnapshot(
         payment_method: data.paymentMethod,
         cashier_name: cashierName,
         created_at: createdAt,
+        store_slug: storeSlug ?? data.storeSlug ?? null,
+        store_code: storeCode ?? data.storeCode ?? null,
       });
 
       if (headerErr) {

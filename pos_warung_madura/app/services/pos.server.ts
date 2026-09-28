@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { pool, query } from "../db.server";
 import type { RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import type { Product, ProductUnit, Sale, StockMovement, StockOpnameItem } from "../types/pos";
@@ -473,17 +475,54 @@ export async function createProductWithUnits(product: Product): Promise<void> {
   }
 }
 
-const SYNC_API_URL = process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync";
-const SYNC_SECRET_KEY = process.env.SYNC_SECRET_KEY || "warung_madura_sync_secret_2026";
+export function getSyncSecretKey(): string {
+  return (process.env.SYNC_SECRET_KEY || "").trim();
+}
+
+export function getSyncApiUrl(): string {
+  return (process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync").trim();
+}
 
 export interface StoreConfig {
   storeCode: string;
   storeName: string;
+  storeSlug: string;
   storeTagline: string;
   storeAddress: string;
   storeCity: string;
   cashierName: string;
   publicInvoiceBaseUrl: string;
+  syncSecretKey?: string;
+}
+
+export interface CloudTenantInfo {
+  valid: boolean;
+  id?: string;
+  storeName?: string;
+  storeCode?: string;
+  storeSlug?: string;
+  storeAddress?: string | null;
+  ownerEmail?: string | null;
+  contactWa?: string | null;
+  plan?: "free" | "pro";
+  status?: "active" | "suspended" | "pending";
+  invoiceCount?: number;
+  invoiceLimit?: number;
+  quotaRemaining?: number;
+  error?: string;
+  errorCode?: string;
+}
+
+export interface CloudStatusResult {
+  ok: boolean;
+  message: string;
+  supabaseConnected?: boolean;
+  tenant?: CloudTenantInfo | null;
+  saas?: {
+    freePlanLimit: number;
+    proPlanPrice: number;
+    resetDay: number;
+  };
 }
 
 /**
@@ -493,52 +532,271 @@ export function getStoreConfig(): StoreConfig {
   return {
     storeCode: process.env.STORE_CODE || "WM01",
     storeName: process.env.STORE_NAME || "Warung Madura Berkah",
+    storeSlug: process.env.STORE_SLUG || "warung-madura-berkah",
     storeTagline: process.env.STORE_TAGLINE || "Buka 24 Jam Non-Stop",
     storeAddress: process.env.STORE_ADDRESS || "Jl. Raya Warung Madura No. 24, Buka 24 Jam Non-Stop",
     storeCity: process.env.STORE_CITY || "Sumenep",
     cashierName: process.env.CASHIER_DEFAULT_NAME || "Cak Mat",
     publicInvoiceBaseUrl: process.env.PUBLIC_INVOICE_BASE_URL || "",
+    syncSecretKey: getSyncSecretKey(),
   };
 }
 
 /**
- * Mengecek ketersediaan server Cloud Invoice Sync
+ * Mengecek ketersediaan server Cloud Invoice Sync & Validasi Tenant SaaS
  */
-export async function testCloudConnection(): Promise<{
-  ok: boolean;
-  message: string;
-  supabaseConnected?: boolean;
-}> {
+export async function testCloudConnection(): Promise<CloudStatusResult> {
+  const syncSecret = getSyncSecretKey();
+  if (!syncSecret) {
+    return {
+      ok: false,
+      message: "Cloud offline / belum terhubung (Secret Key kosong)",
+      tenant: null,
+    };
+  }
+
+  const syncUrl = getSyncApiUrl();
   try {
-    const res = await fetch(SYNC_API_URL, {
+    const res = await fetch(syncUrl, {
       method: "GET",
-      signal: AbortSignal.timeout(1500),
+      headers: {
+        "x-sync-secret": syncSecret,
+      },
+      signal: AbortSignal.timeout(2500),
     });
+
     if (res.ok) {
       const data = await res.json();
+      const tenant: CloudTenantInfo | null = data.tenant || null;
+      let message = "Server Cloud Terhubung";
+
+      if (tenant) {
+        if (!tenant.valid) {
+          message = `Cloud Online — ${tenant.error || "Secret Key tidak valid"}`;
+        } else if (tenant.plan === "pro") {
+          message = `Cloud Online — Paket Pro (Unlimited)`;
+        } else if (tenant.plan === "free") {
+          message = `Cloud Online — Paket Free (Sisa: ${tenant.quotaRemaining}/${tenant.invoiceLimit})`;
+        }
+      }
+
       return {
-        ok: true,
-        message: "Server Cloud Terhubung",
-        supabaseConnected: data.supabaseConnected,
+        ok: Boolean(tenant && tenant.valid),
+        message,
+        supabaseConnected: data.supabase?.connected ?? data.supabaseConnected,
+        tenant,
+        saas: data.saas,
       };
     }
-    return { ok: false, message: `Server Cloud respon ${res.status}` };
+    return { ok: false, message: `Server Cloud respon HTTP ${res.status}`, tenant: null };
   } catch (err: any) {
     return {
       ok: false,
       message: "Server Cloud Offline (jalankan invoice_publik di port 5175)",
+      tenant: null,
+    };
+  }
+}
+
+export interface UpdateCloudConfigInput {
+  syncSecretKey: string;
+  syncApiUrl?: string;
+  publicBaseUrl?: string;
+  storeCode?: string;
+  storeSlug?: string;
+  storeName?: string;
+  storeAddress?: string;
+}
+
+/**
+ * Memverifikasi Secret Key ke server SaaS tanpa menyimpan terlebih dahulu
+ */
+export async function verifyTenantSecret(secretKey: string, apiUrl?: string): Promise<{
+  ok: boolean;
+  message: string;
+  tenant?: CloudTenantInfo | null;
+}> {
+  const url = apiUrl?.trim() || process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync";
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "x-sync-secret": secretKey.trim(),
+      },
+      signal: AbortSignal.timeout(3000),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const tenant = data.tenant as CloudTenantInfo | null;
+      if (tenant && tenant.valid) {
+        return {
+          ok: true,
+          message: `Secret Key Valid! Toko: ${tenant.storeName} (${tenant.storeCode}) — Paket ${tenant.plan?.toUpperCase()}`,
+          tenant,
+        };
+      }
+      return {
+        ok: false,
+        message: tenant?.error || "Secret Key tidak terdaftar di platform SaaS",
+        tenant: null,
+      };
+    }
+    return {
+      ok: false,
+      message: `Server merespon HTTP ${res.status}`,
+      tenant: null,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      message: `Gagal menghubungi server sync (${err.message})`,
+      tenant: null,
     };
   }
 }
 
 /**
+ * Menyimpan konfigurasi cloud SaaS ke file .env dan runtime process.env
+ * Jika hanya secret key yang diinput, identitas toko otomatis diambil dari respon SaaS!
+ */
+export async function saveCloudConfig(input: UpdateCloudConfigInput): Promise<{
+  ok: boolean;
+  message: string;
+  tenant?: CloudTenantInfo | null;
+}> {
+  const secretKey = (input.syncSecretKey || "").trim();
+  if (!secretKey) {
+    return { ok: false, message: "Secret Key tidak boleh kosong", tenant: null };
+  }
+
+  const syncUrl = input.syncApiUrl?.trim() || process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync";
+
+  // 1. Verifikasi secret key ke server SaaS & ambil profil toko lengkap
+  const verifyResult = await verifyTenantSecret(secretKey, syncUrl);
+  if (!verifyResult.ok || !verifyResult.tenant) {
+    return {
+      ok: false,
+      message: verifyResult.message || "Secret Key tidak valid di platform SaaS",
+      tenant: null,
+    };
+  }
+
+  const tenant = verifyResult.tenant;
+
+  // 2. Ambil identitas otomatis dari respon SaaS (kecuali dioverride secara eksplisit)
+  const storeName = input.storeName?.trim() || tenant.storeName || process.env.STORE_NAME || "Warung Madura";
+  const storeCode = input.storeCode?.trim().toUpperCase() || tenant.storeCode || process.env.STORE_CODE || "WM01";
+  const storeSlug = input.storeSlug?.trim() || tenant.storeSlug || process.env.STORE_SLUG || "warung-madura";
+  const storeAddress = input.storeAddress?.trim() || tenant.storeAddress || process.env.STORE_ADDRESS || "";
+  const publicBaseUrl = input.publicBaseUrl !== undefined ? input.publicBaseUrl.trim() : (process.env.PUBLIC_INVOICE_BASE_URL || "");
+
+  // 3. Update runtime process.env
+  process.env.SYNC_SECRET_KEY = secretKey;
+  process.env.PUBLIC_INVOICE_SYNC_URL = syncUrl;
+  process.env.STORE_NAME = storeName;
+  process.env.STORE_CODE = storeCode;
+  process.env.STORE_SLUG = storeSlug;
+  if (storeAddress) process.env.STORE_ADDRESS = storeAddress;
+  if (publicBaseUrl !== undefined) process.env.PUBLIC_INVOICE_BASE_URL = publicBaseUrl;
+
+  // 4. Update file .env secara permanen
+  const envPath = path.resolve(process.cwd(), ".env");
+  let content = "";
+  if (fs.existsSync(envPath)) {
+    content = fs.readFileSync(envPath, "utf-8");
+  }
+
+  const updateEnvKey = (key: string, value: string) => {
+    const regex = new RegExp(`^${key}=.*$`, "m");
+    if (regex.test(content)) {
+      content = content.replace(regex, `${key}=${value}`);
+    } else {
+      content += `\n${key}=${value}`;
+    }
+  };
+
+  updateEnvKey("SYNC_SECRET_KEY", secretKey);
+  updateEnvKey("PUBLIC_INVOICE_SYNC_URL", syncUrl);
+  updateEnvKey("STORE_NAME", storeName);
+  updateEnvKey("STORE_CODE", storeCode);
+  updateEnvKey("STORE_SLUG", storeSlug);
+  if (storeAddress) updateEnvKey("STORE_ADDRESS", storeAddress);
+  if (publicBaseUrl !== undefined) updateEnvKey("PUBLIC_INVOICE_BASE_URL", publicBaseUrl);
+
+  try {
+    fs.writeFileSync(envPath, content, "utf-8");
+  } catch (err: any) {
+    console.error("[saveCloudConfig] Gagal menulis ke .env:", err);
+  }
+
+  return {
+    ok: true,
+    message: `Toko "${storeName}" (${storeCode}) berhasil dihubungkan! Paket: ${tenant.plan?.toUpperCase()}.`,
+    tenant: {
+      ...tenant,
+      storeName,
+      storeCode,
+      storeSlug,
+      storeAddress,
+    },
+  };
+}
+
+/**
+ * Memutuskan sambungan toko dari Cloud SaaS
+ */
+export async function disconnectCloudConfig(): Promise<{ ok: boolean; message: string }> {
+  process.env.SYNC_SECRET_KEY = "";
+  const envPath = path.resolve(process.cwd(), ".env");
+  let content = "";
+  if (fs.existsSync(envPath)) {
+    content = fs.readFileSync(envPath, "utf-8");
+  }
+
+  const regex = new RegExp(`^SYNC_SECRET_KEY=.*$`, "m");
+  if (regex.test(content)) {
+    content = content.replace(regex, `SYNC_SECRET_KEY=`);
+  } else {
+    content += `\nSYNC_SECRET_KEY=`;
+  }
+
+  try {
+    fs.writeFileSync(envPath, content, "utf-8");
+  } catch (err: any) {
+    console.error("[disconnectCloudConfig] Gagal mengosongkan SYNC_SECRET_KEY:", err);
+  }
+
+  return { ok: true, message: "Koneksi cloud toko berhasil diputuskan." };
+}
+
+export interface PushSaleResult {
+  success: boolean;
+  publicUrl?: string | null;
+  quotaRemaining?: number;
+  error?: string;
+  errorCode?: string;
+}
+
+/**
  * Mengirimkan snapshot satu invoice ke server Invoice Publik (Supabase Cloud API)
  */
-export async function pushSaleToPublicInvoice(sale: Sale): Promise<boolean> {
+export async function pushSaleToPublicInvoice(sale: Sale): Promise<PushSaleResult> {
+  const storeConfig = getStoreConfig();
+  const syncSecret = getSyncSecretKey();
+  if (!syncSecret) {
+    return {
+      success: false,
+      error: "Cloud sync belum dikonfigurasi (Secret Key belum terhubung)",
+      errorCode: "NOT_CONNECTED",
+    };
+  }
+
+  const syncUrl = getSyncApiUrl();
+
   try {
-    const storeConfig = getStoreConfig();
     const payload = {
-      secretKey: SYNC_SECRET_KEY,
+      secretKey: syncSecret,
       invoice: {
         id: sale.invoiceCode,
         storeName: storeConfig.storeName,
@@ -559,31 +817,47 @@ export async function pushSaleToPublicInvoice(sale: Sale): Promise<boolean> {
       },
     };
 
-    const res = await fetch(SYNC_API_URL, {
+    const res = await fetch(syncUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-sync-secret": SYNC_SECRET_KEY,
+        "x-sync-secret": syncSecret,
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(4000),
     });
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ok) {
-        await query(
-          `UPDATE sales SET sync_status = 'synced', synced_at = NOW() WHERE id = ?`,
-          [sale.id]
-        );
-        return true;
-      }
+    const data = await res.json().catch(() => null);
+
+    if (res.ok && data?.ok) {
+      await query(
+        `UPDATE sales SET sync_status = 'synced', synced_at = NOW() WHERE id = ?`,
+        [sale.id]
+      );
+      return {
+        success: true,
+        publicUrl: data.publicUrl,
+        quotaRemaining: data.quotaRemaining,
+      };
     }
+
+    const errorMsg = data?.error || `HTTP ${res.status}`;
+    const errorCode = data?.errorCode;
+    console.warn(`[Sync Cloud POS] Gagal kirim invoice ${sale.invoiceCode}:`, errorMsg);
+
+    return {
+      success: false,
+      error: errorMsg,
+      errorCode,
+    };
   } catch (err: any) {
     // Mode offline normal: jika server cloud tidak dapat dihubungi, transaksi tetap aman di MySQL
     console.log("[Sync Cloud POS] Transaksi tersimpan lokal (akan disinkronkan saat online):", err.message);
+    return {
+      success: false,
+      error: err.message || "Cloud server offline",
+    };
   }
-  return false;
 }
 
 export interface SyncSalesResult {
@@ -591,6 +865,9 @@ export interface SyncSalesResult {
   totalPending: number;
   cloudOnline: boolean;
   message: string;
+  quotaRemaining?: number;
+  plan?: string;
+  errorDetail?: string;
 }
 
 /**
@@ -608,6 +885,21 @@ export async function syncSalesInDb(): Promise<SyncSalesResult> {
       totalPending: Number(totalPending),
       cloudOnline: false,
       message: "Server cloud (port 5175) belum aktif. Pastikan aplikasi invoice_publik berjalan.",
+    };
+  }
+
+  // Jika auth secret salah atau toko disuspend
+  if (cloudHealth.tenant && !cloudHealth.tenant.valid) {
+    const pendingSales = await query<RowDataPacket[]>(`
+      SELECT COUNT(*) AS count FROM sales WHERE sync_status = 'pending'
+    `);
+    const totalPending = pendingSales[0]?.count || 0;
+    return {
+      syncedCount: 0,
+      totalPending: Number(totalPending),
+      cloudOnline: true,
+      errorDetail: cloudHealth.tenant.errorCode,
+      message: `Autentikasi Cloud Gagal: ${cloudHealth.tenant.error || "Secret Key tidak valid"}. Periksa SYNC_SECRET_KEY di .env.`,
     };
   }
 
@@ -629,6 +921,8 @@ export async function syncSalesInDb(): Promise<SyncSalesResult> {
       syncedCount: 0,
       totalPending: 0,
       cloudOnline: true,
+      quotaRemaining: cloudHealth.tenant?.quotaRemaining,
+      plan: cloudHealth.tenant?.plan,
       message: "Semua transaksi sudah tersinkron ke cloud.",
     };
   }
@@ -644,6 +938,8 @@ export async function syncSalesInDb(): Promise<SyncSalesResult> {
   `, pendingSales.map((s) => s.id));
 
   let syncedCount = 0;
+  let lastQuotaRemaining = cloudHealth.tenant?.quotaRemaining;
+  let stopReason: string | null = null;
 
   for (const s of pendingSales) {
     const items = itemRows
@@ -671,17 +967,35 @@ export async function syncSalesInDb(): Promise<SyncSalesResult> {
       items,
     };
 
-    const isSuccess = await pushSaleToPublicInvoice(saleObj);
-    if (isSuccess) {
+    const pushResult = await pushSaleToPublicInvoice(saleObj);
+    if (pushResult.success) {
       syncedCount++;
+      if (typeof pushResult.quotaRemaining === "number") {
+        lastQuotaRemaining = pushResult.quotaRemaining;
+      }
+    } else {
+      if (pushResult.errorCode === "QUOTA_EXCEEDED") {
+        stopReason = "Kuota invoice paket Free telah habis. Upgrade ke paket Pro untuk invoice tanpa batas.";
+        break;
+      } else if (pushResult.errorCode === "INVALID_SECRET" || pushResult.errorCode === "SUSPENDED") {
+        stopReason = pushResult.error || "Akses cloud ditolak.";
+        break;
+      }
     }
   }
+
+  const finalMsg = stopReason
+    ? `${syncedCount} dari ${pendingSales.length} transaksi disinkronkan. Berhenti: ${stopReason}`
+    : `${syncedCount} dari ${pendingSales.length} transaksi berhasil disinkronkan ke cloud.`;
 
   return {
     syncedCount,
     totalPending: pendingSales.length,
     cloudOnline: true,
-    message: `${syncedCount} dari ${pendingSales.length} transaksi berhasil disinkronkan ke cloud.`,
+    quotaRemaining: lastQuotaRemaining,
+    plan: cloudHealth.tenant?.plan,
+    errorDetail: stopReason || undefined,
+    message: finalMsg,
   };
 }
 

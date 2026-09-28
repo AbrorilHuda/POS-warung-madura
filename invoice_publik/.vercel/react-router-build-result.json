@@ -1,0 +1,203 @@
+{
+  "buildManifest": {
+    "serverBundles": {
+      "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0": {
+        "id": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+        "file": "build/server/nodejs_eyJydW50aW1lIjoibm9kZWpzIn0/index.js",
+        "config": {
+          "runtime": "nodejs"
+        }
+      }
+    },
+    "routeIdToServerBundleId": {
+      "routes/home": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/daftar": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/admin._index": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/admin.login": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/$storeSlug.invoice.$invoiceCode": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/invoice.$invoiceCode": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/api.sync": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0"
+    },
+    "routes": {
+      "root": {
+        "id": "root",
+        "file": "app/root.tsx",
+        "path": "",
+        "config": {}
+      },
+      "routes/home": {
+        "id": "routes/home",
+        "parentId": "root",
+        "file": "app/routes/home.tsx",
+        "index": true,
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/daftar": {
+        "id": "routes/daftar",
+        "parentId": "root",
+        "file": "app/routes/daftar.tsx",
+        "path": "daftar",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/admin._index": {
+        "id": "routes/admin._index",
+        "parentId": "root",
+        "file": "app/routes/admin._index.tsx",
+        "path": "admin",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/admin.login": {
+        "id": "routes/admin.login",
+        "parentId": "root",
+        "file": "app/routes/admin.login.tsx",
+        "path": "admin/login",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/$storeSlug.invoice.$invoiceCode": {
+        "id": "routes/$storeSlug.invoice.$invoiceCode",
+        "parentId": "root",
+        "file": "app/routes/$storeSlug.invoice.$invoiceCode.tsx",
+        "path": ":storeSlug/invoice/:invoiceCode",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/invoice.$invoiceCode": {
+        "id": "routes/invoice.$invoiceCode",
+        "parentId": "root",
+        "file": "app/routes/invoice.$invoiceCode.tsx",
+        "path": "invoice/:invoiceCode",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/api.sync": {
+        "id": "routes/api.sync",
+        "parentId": "root",
+        "file": "app/routes/api.sync.ts",
+        "path": "api/sync",
+        "config": {
+          "runtime": "nodejs"
+        }
+      }
+    }
+  },
+  "reactRouterConfig": {
+    "appDirectory": "D:/open-source/POS-warung-madura/invoice_publik/app",
+    "basename": "/",
+    "buildDirectory": "D:/open-source/POS-warung-madura/invoice_publik/build",
+    "future": {
+      "unstable_enableNodeReadableStream": false,
+      "unstable_optimizeDeps": false
+    },
+    "routes": {
+      "root": {
+        "id": "root",
+        "file": "root.tsx",
+        "path": ""
+      },
+      "routes/home": {
+        "id": "routes/home",
+        "parentId": "root",
+        "file": "routes/home.tsx",
+        "index": true
+      },
+      "routes/daftar": {
+        "id": "routes/daftar",
+        "parentId": "root",
+        "file": "routes/daftar.tsx",
+        "path": "daftar"
+      },
+      "routes/admin._index": {
+        "id": "routes/admin._index",
+        "parentId": "root",
+        "file": "routes/admin._index.tsx",
+        "path": "admin"
+      },
+      "routes/admin.login": {
+        "id": "routes/admin.login",
+        "parentId": "root",
+        "file": "routes/admin.login.tsx",
+        "path": "admin/login"
+      },
+      "routes/$storeSlug.invoice.$invoiceCode": {
+        "id": "routes/$storeSlug.invoice.$invoiceCode",
+        "parentId": "root",
+        "file": "routes/$storeSlug.invoice.$invoiceCode.tsx",
+        "path": ":storeSlug/invoice/:invoiceCode"
+      },
+      "routes/invoice.$invoiceCode": {
+        "id": "routes/invoice.$invoiceCode",
+        "parentId": "root",
+        "file": "routes/invoice.$invoiceCode.tsx",
+        "path": "invoice/:invoiceCode"
+      },
+      "routes/api.sync": {
+        "id": "routes/api.sync",
+        "parentId": "root",
+        "file": "routes/api.sync.ts",
+        "path": "api/sync"
+      }
+    },
+    "routeDiscovery": {
+      "mode": "lazy",
+      "manifestPath": "/__manifest"
+    },
+    "serverBuildFile": "index.js",
+    "serverModuleFormat": "esm",
+    "ssr": true,
+    "splitRouteModules": true,
+    "subResourceIntegrity": false,
+    "allowedActionOrigins": false,
+    "unstable_routeConfig": [
+      {
+        "id": "root",
+        "path": "",
+        "file": "root.tsx",
+        "children": [
+          {
+            "file": "routes/home.tsx",
+            "index": true
+          },
+          {
+            "file": "routes/daftar.tsx",
+            "path": "daftar"
+          },
+          {
+            "file": "routes/admin._index.tsx",
+            "path": "admin"
+          },
+          {
+            "file": "routes/admin.login.tsx",
+            "path": "admin/login"
+          },
+          {
+            "file": "routes/$storeSlug.invoice.$invoiceCode.tsx",
+            "path": ":storeSlug/invoice/:invoiceCode"
+          },
+          {
+            "file": "routes/invoice.$invoiceCode.tsx",
+            "path": "invoice/:invoiceCode"
+          },
+          {
+            "file": "routes/api.sync.ts",
+            "path": "api/sync"
+          }
+        ]
+      }
+    ]
+  },
+  "viteConfig": {
+    "build": {
+      "assetsDir": "assets"
+    }
+  }
+}

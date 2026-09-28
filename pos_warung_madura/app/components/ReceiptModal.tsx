@@ -38,16 +38,18 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   if (!isOpen || !sale) return null;
 
-  // URL invoice publik: prioritas PUBLIC_INVOICE_BASE_URL dari .env, fallback hostname laptop port 5175
+  // URL invoice publik multi-tenant:
+  // Format: {baseUrl}/{storeSlug}/invoice/{invoiceCode}
   const host =
     typeof window !== "undefined" && window.location.hostname
       ? window.location.hostname
       : "localhost";
   const invoicePort = "5175";
-  const defaultInvoiceUrl = `http://${host}:${invoicePort}/invoice/${sale.invoiceCode}`;
-  const invoiceUrl = storeConfig?.publicInvoiceBaseUrl
-    ? `${storeConfig.publicInvoiceBaseUrl.replace(/\/$/, "")}/invoice/${sale.invoiceCode}`
-    : defaultInvoiceUrl;
+  const baseUrl = storeConfig?.publicInvoiceBaseUrl
+    ? storeConfig.publicInvoiceBaseUrl.replace(/\/$/, "")
+    : `http://${host}:${invoicePort}`;
+  const storeSlug = storeConfig?.storeSlug || "warung-madura-berkah";
+  const invoiceUrl = `${baseUrl}/${storeSlug}/invoice/${sale.invoiceCode}`;
 
   const handleCopyLink = () => {
     if (typeof navigator !== "undefined") {
@@ -62,8 +64,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   };
 
   const handleShareWhatsApp = () => {
+    const storeDisplayName = storeConfig?.storeName?.toUpperCase() || "WARUNG MADURA";
     const waText = encodeURIComponent(
-      `*STRUK BELANJA RESMI WARUNG MADURA*\n` +
+      `*STRUK BELANJA RESMI ${storeDisplayName}*\n` +
       `No. Faktur: ${sale.invoiceCode}\n` +
       `Waktu: ${sale.timestamp}\n` +
       `Total Belanja: Rp ${sale.totalAmount.toLocaleString("id-ID")}\n` +

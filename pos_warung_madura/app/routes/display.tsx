@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useLoaderData } from "react-router";
 import {
   Store,
   Clock,
@@ -18,6 +19,7 @@ import {
   sendCustomerDisplayEvent,
   type CustomerDisplayState,
 } from "../services/customerDisplaySync";
+import { getStoreConfig } from "../services/pos.server";
 
 export function meta() {
   return [
@@ -30,7 +32,13 @@ export function meta() {
   ];
 }
 
+export async function loader() {
+  const storeConfig = getStoreConfig();
+  return { storeConfig };
+}
+
 export default function CustomerDisplay() {
+  const { storeConfig } = useLoaderData<typeof loader>();
   const [displayState, setDisplayState] = useState<CustomerDisplayState>({
     type: "STANDBY",
     timestamp: Date.now(),
@@ -109,14 +117,18 @@ export default function CustomerDisplay() {
     sendCustomerDisplayEvent(standbyEv);
   };
 
-  // Host invoice publik (port 5175)
+  // Host invoice publik multi-tenant (port 5175)
   const host =
     typeof window !== "undefined" && window.location.hostname
       ? window.location.hostname
       : "localhost";
   const invoicePort = "5175";
+  const baseUrl = storeConfig?.publicInvoiceBaseUrl
+    ? storeConfig.publicInvoiceBaseUrl.replace(/\/$/, "")
+    : `http://${host}:${invoicePort}`;
+  const storeSlug = storeConfig?.storeSlug || "warung-madura-berkah";
   const getInvoiceUrl = (code: string) =>
-    `http://${host}:${invoicePort}/invoice/${code}`;
+    `${baseUrl}/${storeSlug}/invoice/${code}`;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col justify-between selection:bg-rose-500 selection:text-white">
@@ -132,7 +144,7 @@ export default function CustomerDisplay() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base font-black tracking-wide text-white uppercase">
-                Warung Madura Berkah
+                {storeConfig?.storeName || "Warung Madura Berkah"}
               </h1>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />

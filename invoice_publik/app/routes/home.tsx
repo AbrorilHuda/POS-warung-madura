@@ -13,10 +13,10 @@ import {
 
 export function meta() {
   return [
-    { title: "Cek Struk Belanja" },
+    { title: "Cek Struk Belanja — POS Warung" },
     {
       name: "description",
-      content: "Portal cek struk dan invoice digital resmi Warung Madura",
+      content: "Portal cek struk dan invoice digital dari berbagai toko. Daftarkan toko kamu di /daftar.",
     },
   ];
 }
@@ -44,6 +44,10 @@ export default function Home() {
 
     setErrorMessage("");
     navigate(`/invoice/${clean}`);
+  };
+
+  const handleDaftar = () => {
+    navigate("/daftar");
   };
 
   return (
@@ -137,8 +141,24 @@ export default function Home() {
         </div>
       </div>
 
+      {/* CTA Pemilik Toko */}
+      <div className="max-w-md w-full mx-auto mt-2 mb-6">
+        <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold text-orange-900">🏪 Punya Toko?</p>
+            <p className="text-[11px] text-orange-700 mt-0.5">Daftarkan toko kamu dan dapatkan invoice publik gratis.</p>
+          </div>
+          <button
+            onClick={handleDaftar}
+            className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition whitespace-nowrap cursor-pointer"
+          >
+            Daftar Gratis <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+
       <footer className="text-center text-[11px] text-slate-400 py-4">
-        POS Warung Madura © 2026 — Buka 24 Jam Non-Stop
+        POS Warung © 2026 — Platform Invoice Digital untuk Warung &amp; Toko Kelontong
       </footer>
     </div>
   );
