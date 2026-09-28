@@ -291,7 +291,7 @@ export default function Home() {
       } else if (!syncRes.cloudOnline) {
         setSyncToast({
           type: "error",
-          message: syncRes.message || "Server Cloud Offline (port 5175). Jalankan invoice_publik.",
+          message: syncRes.message || "Server Cloud Offline. Pastikan endpoint invoice publik online.",
         });
       } else {
         setSyncToast({

@@ -44,10 +44,19 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     typeof window !== "undefined" && window.location.hostname
       ? window.location.hostname
       : "localhost";
-  const invoicePort = "5175";
-  const baseUrl = storeConfig?.publicInvoiceBaseUrl
-    ? storeConfig.publicInvoiceBaseUrl.replace(/\/$/, "")
-    : `http://${host}:${invoicePort}`;
+
+  let fallbackBaseUrl = `http://${host}:5175`;
+  if (
+    storeConfig?.publicInvoiceSyncUrl &&
+    !storeConfig.publicInvoiceSyncUrl.includes("127.0.0.1") &&
+    !storeConfig.publicInvoiceSyncUrl.includes("localhost")
+  ) {
+    try {
+      fallbackBaseUrl = new URL(storeConfig.publicInvoiceSyncUrl).origin;
+    } catch (e) {}
+  }
+
+  const baseUrl = (storeConfig?.publicInvoiceBaseUrl || fallbackBaseUrl).replace(/\/$/, "");
   const storeSlug = storeConfig?.storeSlug || "warung-madura-berkah";
   const invoiceUrl = `${baseUrl}/${storeSlug}/invoice/${sale.invoiceCode}`;
 
@@ -351,7 +360,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       Pelanggan dapat melihat nota ini di HP melalui jaringan lokal / cloud.
                     </p>
                     <span className="inline-block text-[9px] font-mono text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                      Port {invoicePort} Online
+                      Cloud / Publik Online
                     </span>
                   </div>
                 </div>

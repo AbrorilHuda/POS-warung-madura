@@ -117,15 +117,24 @@ export default function CustomerDisplay() {
     sendCustomerDisplayEvent(standbyEv);
   };
 
-  // Host invoice publik multi-tenant (port 5175)
+  // Host invoice publik multi-tenant
   const host =
     typeof window !== "undefined" && window.location.hostname
       ? window.location.hostname
       : "localhost";
-  const invoicePort = "5175";
-  const baseUrl = storeConfig?.publicInvoiceBaseUrl
-    ? storeConfig.publicInvoiceBaseUrl.replace(/\/$/, "")
-    : `http://${host}:${invoicePort}`;
+
+  let fallbackBaseUrl = `http://${host}:5175`;
+  if (
+    storeConfig?.publicInvoiceSyncUrl &&
+    !storeConfig.publicInvoiceSyncUrl.includes("127.0.0.1") &&
+    !storeConfig.publicInvoiceSyncUrl.includes("localhost")
+  ) {
+    try {
+      fallbackBaseUrl = new URL(storeConfig.publicInvoiceSyncUrl).origin;
+    } catch (e) {}
+  }
+
+  const baseUrl = (storeConfig?.publicInvoiceBaseUrl || fallbackBaseUrl).replace(/\/$/, "");
   const storeSlug = storeConfig?.storeSlug || "warung-madura-berkah";
   const getInvoiceUrl = (code: string) =>
     `${baseUrl}/${storeSlug}/invoice/${code}`;

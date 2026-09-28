@@ -184,10 +184,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 : pendingSyncCount > 0
                   ? cloudConnected
                     ? `${pendingSyncCount} transaksi tertunda. Klik untuk menyinkronkan ke cloud.`
-                    : `${pendingSyncCount} transaksi tertunda. Server cloud offline (jalankan invoice_publik di port 5175).`
+                    : `${pendingSyncCount} transaksi tertunda. Server cloud offline (${cloudMessage || "periksa koneksi"}).`
                   : cloudConnected
                     ? "Semua transaksi tersinkron ke cloud"
-                    : "Server invoice publik offline (port 5175 belum aktif)"
+                    : `Server invoice publik offline (${cloudMessage || "klik untuk konfigurasi"})`
             }
             className={`flex-1 flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border transition cursor-pointer ${
               pendingSyncCount > 0
@@ -287,7 +287,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="text-slate-300">&bull;</span>
             <span
               className={`${cloudConnected ? "text-emerald-600" : "text-slate-400"} font-medium flex items-center gap-1`}
-              title={cloudConnected ? "Cloud Sync API aktif (port 5175)" : "Cloud Sync offline (port 5175)"}
+              title={cloudConnected ? `Cloud Sync API aktif: ${cloudMessage}` : `Cloud Sync offline: ${cloudMessage}`}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${cloudConnected ? "bg-emerald-500" : "bg-slate-300"}`}></span>
               <span>Cloud</span>

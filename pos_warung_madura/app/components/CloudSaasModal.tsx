@@ -58,7 +58,11 @@ export const CloudSaasModal: React.FC<CloudSaasModalProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Pengaturan lanjutan (opsional)
-  const [syncApiUrl, setSyncApiUrl] = useState("http://127.0.0.1:5175/api/sync");
+  const defaultSyncUrl =
+    storeConfig?.publicInvoiceSyncUrl && !storeConfig.publicInvoiceSyncUrl.includes("5175")
+      ? storeConfig.publicInvoiceSyncUrl
+      : "https://pos-warung-madura-theta.vercel.app/api/sync";
+  const [syncApiUrl, setSyncApiUrl] = useState(defaultSyncUrl);
   const [publicBaseUrl, setPublicBaseUrl] = useState(storeConfig?.publicInvoiceBaseUrl || "");
 
   // Status feedback
@@ -74,11 +78,21 @@ export const CloudSaasModal: React.FC<CloudSaasModalProps> = ({
       setActionSuccess(null);
       setIsSwitchingToken(false);
       setInputToken(storeConfig?.syncSecretKey || "");
+      if (storeConfig?.publicInvoiceSyncUrl && !storeConfig.publicInvoiceSyncUrl.includes("5175")) {
+        setSyncApiUrl(storeConfig.publicInvoiceSyncUrl);
+      } else {
+        setSyncApiUrl("https://pos-warung-madura-theta.vercel.app/api/sync");
+      }
       if (storeConfig?.publicInvoiceBaseUrl !== undefined) {
         setPublicBaseUrl(storeConfig.publicInvoiceBaseUrl);
       }
     }
-  }, [isOpen, storeConfig?.syncSecretKey, storeConfig?.publicInvoiceBaseUrl]);
+  }, [
+    isOpen,
+    storeConfig?.syncSecretKey,
+    storeConfig?.publicInvoiceSyncUrl,
+    storeConfig?.publicInvoiceBaseUrl,
+  ]);
 
   // Handle feedback dari fetcher (Connect / Disconnect)
   useEffect(() => {
@@ -122,10 +136,16 @@ export const CloudSaasModal: React.FC<CloudSaasModalProps> = ({
     typeof window !== "undefined" && window.location.hostname
       ? window.location.hostname
       : "localhost";
-  const invoicePort = "5175";
-  const effectiveBaseUrl = publicBaseUrl
-    ? publicBaseUrl.replace(/\/$/, "")
-    : `http://${host}:${invoicePort}`;
+
+  let fallbackBaseUrl = `http://${host}:5175`;
+  const candidateSync = syncApiUrl || storeConfig?.publicInvoiceSyncUrl;
+  if (candidateSync && !candidateSync.includes("127.0.0.1") && !candidateSync.includes("localhost")) {
+    try {
+      fallbackBaseUrl = new URL(candidateSync).origin;
+    } catch (e) {}
+  }
+
+  const effectiveBaseUrl = (publicBaseUrl || storeConfig?.publicInvoiceBaseUrl || fallbackBaseUrl).replace(/\/$/, "");
   const effectiveSlug = cloudTenant?.storeSlug || storeConfig?.storeSlug || "warung-madura-berkah";
   const effectiveCode = cloudTenant?.storeCode || storeConfig?.storeCode || "WM01";
   const exampleInvoiceUrl = `${effectiveBaseUrl}/${effectiveSlug}/invoice/${effectiveCode}-000001`;
@@ -152,12 +172,31 @@ export const CloudSaasModal: React.FC<CloudSaasModalProps> = ({
     }
 
     setActionError(null);
+
+    // Dapatkan URL sync yang benar:
+    let targetSyncUrl = (syncApiUrl || "").trim();
+    const envSyncUrl = storeConfig?.publicInvoiceSyncUrl?.trim();
+    if (!targetSyncUrl || (targetSyncUrl.includes("5175") && envSyncUrl && !envSyncUrl.includes("5175"))) {
+      targetSyncUrl = envSyncUrl || "https://pos-warung-madura-theta.vercel.app/api/sync";
+    }
+
+    let targetBaseUrl = (publicBaseUrl || "").trim();
+    if (!targetBaseUrl && storeConfig?.publicInvoiceBaseUrl) {
+      targetBaseUrl = storeConfig.publicInvoiceBaseUrl.trim();
+    } else if (!targetBaseUrl) {
+      try {
+        targetBaseUrl = new URL(targetSyncUrl).origin;
+      } catch (err) {
+        targetBaseUrl = "https://pos-warung-madura-theta.vercel.app";
+      }
+    }
+
     fetcher.submit(
       {
         intent: "save_cloud_config",
         sync_secret_key: inputToken.trim(),
-        sync_api_url: syncApiUrl.trim(),
-        public_base_url: publicBaseUrl.trim(),
+        sync_api_url: targetSyncUrl,
+        public_base_url: targetBaseUrl,
       },
       { method: "POST" }
     );
@@ -235,7 +274,7 @@ export const CloudSaasModal: React.FC<CloudSaasModalProps> = ({
               <div className="flex-1">
                 <p>{actionError}</p>
                 <p className="text-[10px] font-normal text-rose-600 mt-0.5">
-                  Pastikan server invoice_publik aktif di port 5175 dan Secret Key yang Anda masukkan benar.
+                  Pastikan endpoint sync dapat dijangkau dan Secret Key yang Anda masukkan benar.
                 </p>
               </div>
             </div>
@@ -508,7 +547,7 @@ export const CloudSaasModal: React.FC<CloudSaasModalProps> = ({
                         type="text"
                         value={syncApiUrl}
                         onChange={(e) => setSyncApiUrl(e.target.value)}
-                        placeholder="http://127.0.0.1:5175/api/sync"
+                        placeholder="https://pos-warung-madura-theta.vercel.app/api/sync"
                         className="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-slate-900 transition"
                       />
                     </div>
@@ -521,7 +560,7 @@ export const CloudSaasModal: React.FC<CloudSaasModalProps> = ({
                         type="text"
                         value={publicBaseUrl}
                         onChange={(e) => setPublicBaseUrl(e.target.value)}
-                        placeholder="https://warungku.my.id"
+                        placeholder="https://pos-warung-madura-theta.vercel.app"
                         className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-slate-900 transition"
                       />
                       <p className="text-[10px] text-slate-400 mt-1">

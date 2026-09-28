@@ -1,8 +1,20 @@
 import fs from "fs";
 import path from "path";
+import dotenv from "dotenv";
 import { pool, query } from "../db.server";
 import type { RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import type { Product, ProductUnit, Sale, StockMovement, StockOpnameItem } from "../types/pos";
+
+/**
+ * Reload environment variables dari file .env secara realtime
+ */
+export function reloadEnv() {
+  const envPath = path.resolve(process.cwd(), ".env");
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath, override: true });
+  }
+}
+
 
 /**
  * Mengambil semua data produk beserta multi-satuan dan stok realtime dari ledger
@@ -476,10 +488,12 @@ export async function createProductWithUnits(product: Product): Promise<void> {
 }
 
 export function getSyncSecretKey(): string {
+  reloadEnv();
   return (process.env.SYNC_SECRET_KEY || "").trim();
 }
 
 export function getSyncApiUrl(): string {
+  reloadEnv();
   return (process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync").trim();
 }
 
@@ -493,6 +507,7 @@ export interface StoreConfig {
   cashierName: string;
   publicInvoiceBaseUrl: string;
   syncSecretKey?: string;
+  publicInvoiceSyncUrl: string;
 }
 
 export interface CloudTenantInfo {
@@ -529,6 +544,7 @@ export interface CloudStatusResult {
  * Membaca konfigurasi profil toko / warung dari environment variable (.env)
  */
 export function getStoreConfig(): StoreConfig {
+  reloadEnv();
   return {
     storeCode: process.env.STORE_CODE || "WM01",
     storeName: process.env.STORE_NAME || "Warung Madura Berkah",
@@ -539,6 +555,7 @@ export function getStoreConfig(): StoreConfig {
     cashierName: process.env.CASHIER_DEFAULT_NAME || "Cak Mat",
     publicInvoiceBaseUrl: process.env.PUBLIC_INVOICE_BASE_URL || "",
     syncSecretKey: getSyncSecretKey(),
+    publicInvoiceSyncUrl: getSyncApiUrl(),
   };
 }
 
@@ -546,6 +563,7 @@ export function getStoreConfig(): StoreConfig {
  * Mengecek ketersediaan server Cloud Invoice Sync & Validasi Tenant SaaS
  */
 export async function testCloudConnection(): Promise<CloudStatusResult> {
+  reloadEnv();
   const syncSecret = getSyncSecretKey();
   if (!syncSecret) {
     return {
@@ -555,14 +573,19 @@ export async function testCloudConnection(): Promise<CloudStatusResult> {
     };
   }
 
-  const syncUrl = getSyncApiUrl();
+  let syncUrl = getSyncApiUrl();
+  const envSync = process.env.PUBLIC_INVOICE_SYNC_URL?.trim();
+  if (syncUrl.includes("5175") && envSync && !envSync.includes("5175")) {
+    syncUrl = envSync;
+  }
+
   try {
     const res = await fetch(syncUrl, {
       method: "GET",
       headers: {
         "x-sync-secret": syncSecret,
       },
-      signal: AbortSignal.timeout(2500),
+      signal: AbortSignal.timeout(10000),
     });
 
     if (res.ok) {
@@ -590,9 +613,11 @@ export async function testCloudConnection(): Promise<CloudStatusResult> {
     }
     return { ok: false, message: `Server Cloud respon HTTP ${res.status}`, tenant: null };
   } catch (err: any) {
+    const causeMsg = err.cause?.message || err.cause?.code || "";
+    const detail = causeMsg ? `${err.message} (${causeMsg})` : err.message;
     return {
       ok: false,
-      message: "Server Cloud Offline (jalankan invoice_publik di port 5175)",
+      message: `Server Cloud Offline (${detail})`,
       tenant: null,
     };
   }
@@ -616,14 +641,25 @@ export async function verifyTenantSecret(secretKey: string, apiUrl?: string): Pr
   message: string;
   tenant?: CloudTenantInfo | null;
 }> {
-  const url = apiUrl?.trim() || process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync";
+  reloadEnv();
+  const configuredUrl = getSyncApiUrl();
+  let url = (apiUrl || "").trim();
+
+  // Jika URL yang diinput masih localhost:5175 tetapi env sudah diset URL cloud publik, prioritaskan URL cloud
+  if (!url || (url.includes("5175") && configuredUrl && !configuredUrl.includes("5175"))) {
+    url = configuredUrl;
+  }
+  if (!url) {
+    url = "https://pos-warung-madura-theta.vercel.app/api/sync";
+  }
+
   try {
     const res = await fetch(url, {
       method: "GET",
       headers: {
         "x-sync-secret": secretKey.trim(),
       },
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(15000), // 15 detik agar tidak mudah timeout pada cold-start cloud
     });
 
     if (res.ok) {
@@ -648,9 +684,11 @@ export async function verifyTenantSecret(secretKey: string, apiUrl?: string): Pr
       tenant: null,
     };
   } catch (err: any) {
+    const causeMsg = err.cause?.message || err.cause?.code || "";
+    const detail = causeMsg ? `${err.message}: ${causeMsg}` : err.message;
     return {
       ok: false,
-      message: `Gagal menghubungi server sync (${err.message})`,
+      message: `Gagal menghubungi server sync [${url}] (${detail})`,
       tenant: null,
     };
   }
@@ -665,12 +703,20 @@ export async function saveCloudConfig(input: UpdateCloudConfigInput): Promise<{
   message: string;
   tenant?: CloudTenantInfo | null;
 }> {
+  reloadEnv();
   const secretKey = (input.syncSecretKey || "").trim();
   if (!secretKey) {
     return { ok: false, message: "Secret Key tidak boleh kosong", tenant: null };
   }
 
-  const syncUrl = input.syncApiUrl?.trim() || process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync";
+  const configuredUrl = getSyncApiUrl();
+  let syncUrl = (input.syncApiUrl || "").trim();
+  if (!syncUrl || (syncUrl.includes("5175") && configuredUrl && !configuredUrl.includes("5175"))) {
+    syncUrl = configuredUrl;
+  }
+  if (!syncUrl) {
+    syncUrl = "https://pos-warung-madura-theta.vercel.app/api/sync";
+  }
 
   // 1. Verifikasi secret key ke server SaaS & ambil profil toko lengkap
   const verifyResult = await verifyTenantSecret(secretKey, syncUrl);
@@ -884,7 +930,7 @@ export async function syncSalesInDb(): Promise<SyncSalesResult> {
       syncedCount: 0,
       totalPending: Number(totalPending),
       cloudOnline: false,
-      message: "Server cloud (port 5175) belum aktif. Pastikan aplikasi invoice_publik berjalan.",
+      message: "Server cloud belum aktif atau tidak dapat dijangkau. Pastikan endpoint invoice publik online.",
     };
   }
 
