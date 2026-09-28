@@ -43,6 +43,25 @@ let mainWindow: BrowserWindow | null = null;
 let mysqlProcess: ChildProcess | null = null;
 let serverProcess: ChildProcess | null = null;
 let isShuttingDown = false;
+let serverStderr = "";
+let serverExitCode: number | null = null;
+
+export function logToFile(category: string, message: string): void {
+  try {
+    const logPath = path.join(app.getPath("userData"), "app.log");
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync(logPath, `[${timestamp}] [${category}] ${message}\n`, "utf8");
+  } catch (e) {}
+}
+
+process.on("uncaughtException", (err) => {
+  logToFile("Electron Fatal", `Uncaught Exception: ${err.stack || err.message}`);
+});
+
+process.on("unhandledRejection", (reason: any) => {
+  logToFile("Electron Fatal", `Unhandled Rejection: ${reason?.stack || reason}`);
+});
+
 
 // ----------------------------------------------------------------------------
 // RESOLUSI PATH DINAMIS
@@ -268,6 +287,7 @@ async function waitForHttpServer(
 ): Promise<{ ok: boolean; finalUrl: string }> {
   const start = Date.now();
   console.log(`[Electron Main] Menunggu server HTTP siap di ${initialUrl}...`);
+  logToFile("Electron Main", `Menunggu server HTTP siap di ${initialUrl}...`);
 
   const candidates = [
     initialUrl,
@@ -277,11 +297,18 @@ async function waitForHttpServer(
   ];
 
   while (Date.now() - start < timeoutMs) {
+    // Jika server Node sudah exit duluan (crash), hentikan penantian segera
+    if (serverExitCode !== null) {
+      logToFile("Electron Main Error", `Server Node berhenti prematur dengan exit code ${serverExitCode}`);
+      return { ok: false, finalUrl: initialUrl };
+    }
+
     for (const testUrl of candidates) {
       try {
         const res = await fetch(testUrl);
         if (res.status >= 200 && res.status < 500) {
           console.log(`[Electron Main] Server HTTP siap pada ${testUrl} (status ${res.status})!`);
+          logToFile("Electron Main", `Server HTTP siap pada ${testUrl} (status ${res.status})!`);
           return { ok: true, finalUrl: testUrl };
         }
       } catch (e) {
@@ -297,12 +324,18 @@ async function waitForHttpServer(
 function startProductionNodeServer(): void {
   const serverPath = path.join(appRoot, "server", "production-server.mjs");
   if (!fs.existsSync(serverPath)) {
-    throw new Error(`File server produksi tidak ditemukan di ${serverPath}. Silakan pastikan server/production-server.mjs tersedia.`);
+    const errMsg = `File server produksi tidak ditemukan di ${serverPath}. Silakan pastikan server/production-server.mjs tersedia.`;
+    logToFile("Electron Main Error", errMsg);
+    throw new Error(errMsg);
   }
 
   const certDir = path.join(app.getPath("userData"), "certs");
 
   console.log("[Electron Main] Menjalankan Node server produksi:", serverPath);
+  logToFile("Electron Main", `Menjalankan Node server produksi: ${serverPath}`);
+
+  serverStderr = "";
+  serverExitCode = null;
 
   const envVars = {
     ...process.env,
@@ -325,16 +358,30 @@ function startProductionNodeServer(): void {
   });
 
   serverProcess.stdout?.on("data", (chunk) => {
-    console.log("[Node Server]", chunk.toString().trim());
+    const text = chunk.toString().trim();
+    console.log("[Node Server]", text);
+    logToFile("Node Server", text);
   });
 
   serverProcess.stderr?.on("data", (chunk) => {
-    console.log("[Node Server Error]", chunk.toString().trim());
+    const text = chunk.toString().trim();
+    console.log("[Node Server Error]", text);
+    logToFile("Node Server Error", text);
+    serverStderr += text + "\n";
   });
 
   serverProcess.on("exit", (code) => {
     console.log(`[Node Server] Berhenti dengan code ${code}`);
+    logToFile("Node Server", `Berhenti dengan code ${code}`);
+    serverExitCode = code;
     serverProcess = null;
+  });
+
+  serverProcess.on("error", (err) => {
+    const text = `Gagal menjalankan child process server: ${err.message}`;
+    console.error("[Node Server Spawn Error]", text);
+    logToFile("Node Server Spawn Error", text);
+    serverStderr += text + "\n";
   });
 }
 
@@ -503,10 +550,18 @@ app.whenReady().then(async () => {
 
       const { ok: serverReady, finalUrl } = await waitForHttpServer(targetUrl, 25000);
       if (!serverReady) {
-        dialog.showErrorBox(
-          "Server Aplikasi Gagal Memulai",
-          `Server internal Node.js tidak merespons pada ${targetUrl}.`
-        );
+        let errorDetail = `Server internal Node.js tidak merespons pada ${targetUrl}.`;
+        if (serverExitCode !== null) {
+          errorDetail += `\n\nServer berhenti lebih awal (Exit code: ${serverExitCode}).`;
+        }
+        if (serverStderr.trim()) {
+          errorDetail += `\n\nPesan Error:\n${serverStderr.trim().slice(-1000)}`;
+        }
+        const logFileLocation = path.join(app.getPath("userData"), "app.log");
+        errorDetail += `\n\nCatatan log tersimpan di:\n${logFileLocation}`;
+
+        logToFile("Electron Main Error", errorDetail);
+        dialog.showErrorBox("Server Aplikasi Gagal Memulai", errorDetail);
         await cleanShutdown();
         app.quit();
         return;

@@ -160,7 +160,23 @@ wss.on("connection", (ws, req) => {
   });
 });
 
+httpsServer.on("error", (err) => {
+  console.error(`[Production Server Fatal Error] Gagal menjalankan server HTTPS:`, err);
+  process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[Production Server Fatal] Uncaught Exception:", err);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[Production Server Fatal] Unhandled Rejection:", reason);
+  process.exit(1);
+});
+
 httpsServer.listen(PORT, HOST, () => {
   console.log(`Server (HTTPS) listening on https://${HOST}:${PORT}`);
   console.log(`WebSocket Server (WSS) terpasang pada https://${HOST}:${PORT}/ws-scanner`);
 });
+

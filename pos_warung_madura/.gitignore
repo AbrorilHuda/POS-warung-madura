@@ -14,3 +14,7 @@ prd.md
 /resources/mysql/share/
 /resources/mysql/data/*
 !/resources/mysql/data/.gitkeep
+
+# Local certs & logs
+/certs/
+*.log

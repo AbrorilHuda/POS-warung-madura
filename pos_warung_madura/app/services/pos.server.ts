@@ -11,7 +11,11 @@ import type { Product, ProductUnit, Sale, StockMovement, StockOpnameItem } from 
 export function reloadEnv() {
   const envPath = path.resolve(process.cwd(), ".env");
   if (fs.existsSync(envPath)) {
-    dotenv.config({ path: envPath, override: true });
+    try {
+      dotenv.config({ path: envPath, override: true });
+    } catch (e) {
+      console.warn("[POS Service] Gagal memuat file .env:", e);
+    }
   }
 }
 
