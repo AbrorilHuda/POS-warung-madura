@@ -19,13 +19,17 @@ import {
   Clock,
   Sparkles,
   FileText,
+  Users,
+  Lock,
+  KeyRound,
+  ShieldCheck,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import {
   sendCustomerDisplayEvent,
   listenKasirRequestState,
 } from "../services/customerDisplaySync";
-import type { Product, ProductUnit, CartItem, Sale } from "../types/pos";
+import type { Product, ProductUnit, CartItem, Sale, CustomerSummary } from "../types/pos";
 import type { StoreConfig } from "../services/pos.server";
 
 interface KasirPOSProps {
@@ -54,10 +58,25 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState<"Tunai" | "QRIS" | "Hutang">("Tunai");
+  const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+  const [showPinModal, setShowPinModal] = useState<boolean>(false);
+  const [pinInput, setPinInput] = useState<string>("");
+  const [pinError, setPinError] = useState<string>("");
+  const [isPinApproved, setIsPinApproved] = useState<boolean>(false);
   const [invoiceSeq, setInvoiceSeq] = useState<number>(nextInvoiceSeq || 141);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const paidInputRef = useRef<HTMLInputElement>(null);
   const lastCompletedSaleRef = useRef<Sale | null>(null);
+
+  useEffect(() => {
+    fetch("/api/customers")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok && d.customers) setCustomers(d.customers);
+      })
+      .catch(() => {});
+  }, []);
 
   const storePrefix = storeConfig?.storeCode || "WM01";
   const currentInvoiceCode = `${storePrefix}-${String(invoiceSeq).padStart(6, "0")}`;
@@ -289,6 +308,27 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
       return;
     }
 
+    const isKasbon = paymentMethod === "Hutang";
+    const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
+    const kasbonDebtPortion = Math.max(0, grandTotal - (paidAmount || 0));
+
+    if (isKasbon) {
+      if (!selectedCustomerId) {
+        alert("Transaksi Kasbon wajib memilih data pelanggan!");
+        return;
+      }
+
+      const isOverLimit =
+        selectedCustomer &&
+        selectedCustomer.creditLimit > 0 &&
+        selectedCustomer.totalDebt + kasbonDebtPortion > selectedCustomer.creditLimit;
+
+      if (isOverLimit && !isPinApproved) {
+        setShowPinModal(true);
+        return;
+      }
+    }
+
     try {
       confetti({
         particleCount: 50,
@@ -296,6 +336,9 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
         origin: { y: 0.8 },
       });
     } catch (e) {}
+
+    const actualPaid = paymentMethod === "Tunai" ? paidAmount : isKasbon ? (paidAmount || 0) : grandTotal;
+    const debtRemainder = isKasbon ? Math.max(0, grandTotal - actualPaid) : 0;
 
     const newSale: Sale = {
       id: `sale-${Date.now()}`,
@@ -312,9 +355,12 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
         costPrice: c.costPrice,
       })),
       totalAmount: grandTotal,
-      paidAmount: paymentMethod === "Tunai" ? paidAmount : grandTotal,
+      paidAmount: actualPaid,
       changeAmount: paymentMethod === "Tunai" ? changeAmount : 0,
-      paymentMethod: paymentMethod,
+      paymentMethod: isKasbon ? "Kasbon" : paymentMethod,
+      customerId: isKasbon ? selectedCustomerId : undefined,
+      customerName: isKasbon ? selectedCustomer?.name : undefined,
+      customerDebtRemaining: isKasbon ? (selectedCustomer?.totalDebt || 0) + debtRemainder : undefined,
       syncStatus: "pending",
       cashierName: storeConfig?.cashierName || "Cak Mat",
     };
@@ -328,6 +374,8 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
     });
     setInvoiceSeq((seq) => seq + 1);
     clearCart(false);
+    setSelectedCustomerId("");
+    setIsPinApproved(false);
   };
 
   const filteredProducts = products.filter((p) => {
@@ -707,7 +755,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
               {[
                 { id: "Tunai", icon: Banknote, label: "Tunai" },
                 { id: "QRIS", icon: QrCode, label: "QRIS" },
-                { id: "Hutang", icon: FileText, label: "Hutang" },
+                { id: "Hutang", icon: FileText, label: "Kasbon" },
               ].map(({ id, icon: Icon, label }) => {
                 const isSelected = paymentMethod === id;
                 return (
@@ -787,23 +835,214 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
               </div>
             )}
 
+            {/* Pilihan Pelanggan & Pembayaran Sebagian Kasbon (PRD F1.2 & F1.3) */}
+            {paymentMethod === "Hutang" && (
+              <div className="space-y-2 p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
+                    <Users className="w-3.5 h-3.5 text-amber-700" />
+                    Pilih Pelanggan Kasbon:
+                  </span>
+                  {selectedCustomerId && (
+                    <span className="text-[10px] font-mono font-semibold text-amber-800">
+                      Utang: Rp {customers.find((c) => c.id === selectedCustomerId)?.totalDebt.toLocaleString("id-ID") || 0}
+                    </span>
+                  )}
+                </div>
+
+                <select
+                  value={selectedCustomerId}
+                  onChange={(e) => {
+                    setSelectedCustomerId(e.target.value);
+                    setIsPinApproved(false);
+                  }}
+                  className="w-full px-3 py-2 text-xs bg-white border border-amber-300 rounded-xl text-slate-800 font-semibold focus:outline-none"
+                >
+                  <option value="">-- Pilih Nama Pelanggan (Wajib) --</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.phone ? `(${c.phone})` : ""} — Sisa Utang: Rp {c.totalDebt.toLocaleString("id-ID")}{c.creditLimit > 0 ? ` | Limit: Rp ${c.creditLimit.toLocaleString("id-ID")}` : ""}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Split Payment: Bayar sebagian tunai (PRD F1.3) */}
+                <div className="flex items-center gap-2 pt-1 border-t border-amber-200/60">
+                  <span className="text-[11px] font-medium text-amber-900 whitespace-nowrap">
+                    Bayar Tunai Dimuka:
+                  </span>
+                  <div className="relative flex-1">
+                    <span className="absolute left-2.5 top-1.5 text-[10px] font-mono text-slate-400">Rp</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max={grandTotal}
+                      value={paidAmount || ""}
+                      onChange={(e) => setPaidAmount(Math.min(grandTotal, Number(e.target.value)))}
+                      placeholder="0 (Semua kasbon)"
+                      className="w-full pl-7 pr-2 py-1 text-xs bg-white border border-amber-300 rounded-lg font-mono font-bold text-slate-800 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-amber-950 font-medium">
+                  <span>Sisa Masuk Kasbon:</span>
+                  <span className="font-mono font-bold text-rose-600">
+                    Rp {Math.max(0, grandTotal - (paidAmount || 0)).toLocaleString("id-ID")}
+                  </span>
+                </div>
+
+                {/* Peringatan Limit Kasbon (PRD F1.7) */}
+                {(() => {
+                  const cust = customers.find((c) => c.id === selectedCustomerId);
+                  const kasbonDebt = Math.max(0, grandTotal - (paidAmount || 0));
+                  const isOver = cust && cust.creditLimit > 0 && cust.totalDebt + kasbonDebt > cust.creditLimit;
+
+                  if (isOver) {
+                    return (
+                      <div className="p-2 rounded-xl bg-rose-100 border border-rose-300 text-rose-800 text-[11px] space-y-1">
+                        <div className="flex items-center gap-1.5 font-bold">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Kasbon melebihi limit kredit!</span>
+                        </div>
+                        <div className="text-[10px] text-rose-700">
+                          Limit: Rp {cust.creditLimit.toLocaleString("id-ID")} | Total Baru: Rp {(cust.totalDebt + kasbonDebt).toLocaleString("id-ID")}
+                        </div>
+                        {isPinApproved ? (
+                          <div className="text-[10px] text-emerald-700 font-bold flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Disetujui dengan PIN Pemilik
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowPinModal(true)}
+                            className="w-full mt-1 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] transition cursor-pointer"
+                          >
+                            Masukkan PIN Pemilik untuk Menyetujui
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+            )}
+
             {/* Tombol Eksekusi Checkout Utama */}
             <button
               type="button"
-              disabled={cart.length === 0}
+              disabled={cart.length === 0 || (paymentMethod === "Hutang" && !selectedCustomerId)}
               onClick={handleCheckout}
               className={`w-full py-3.5 rounded-2xl font-black text-xs sm:text-sm tracking-wide flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm ${
-                cart.length > 0
+                cart.length > 0 && !(paymentMethod === "Hutang" && !selectedCustomerId)
                   ? "bg-emerald-600 hover:bg-emerald-500 text-white active:scale-[0.99] shadow-emerald-700/20"
                   : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
               }`}
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>BAYAR &amp; CETAK STRUK [F9]</span>
+              <span>
+                {paymentMethod === "Hutang"
+                  ? selectedCustomerId
+                    ? "SIMPAN TRANSAKSI KASBON [F9]"
+                    : "PILIH PELANGGAN TERLEBIH DAHULU"
+                  : "BAYAR & CETAK STRUK [F9]"}
+              </span>
             </button>
           </div>
         </div>
       </div>
+
+      {/* Modal Otorisasi PIN Pemilik untuk Kasbon Over Limit (PRD F1.7) */}
+      {showPinModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-xs bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 text-slate-900 space-y-3.5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2 text-rose-600 font-bold text-sm">
+                <Lock className="w-4 h-4" />
+                <span>Otorisasi PIN Pemilik</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPinModal(false);
+                  setPinInput("");
+                  setPinError("");
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Transaksi ini melebihi limit kasbon pelanggan. Masukkan PIN Pemilik (default: <strong>1234</strong>) untuk melanjutkan.
+            </p>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setPinError("");
+                try {
+                  const res = await fetch("/api/customers", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "verifyPin", pin: pinInput }),
+                  });
+                  const d = await res.json();
+                  if (d.ok && d.valid) {
+                    setIsPinApproved(true);
+                    setShowPinModal(false);
+                    setPinInput("");
+                  } else {
+                    setPinError("PIN Pemilik tidak tepat!");
+                  }
+                } catch {
+                  setPinError("Gagal memvalidasi PIN");
+                }
+              }}
+              className="space-y-3"
+            >
+              <input
+                type="password"
+                autoFocus
+                maxLength={6}
+                placeholder="PIN 4 digit..."
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                className="w-full text-center tracking-widest text-lg font-mono font-black py-2 border border-slate-300 rounded-xl focus:border-rose-500 focus:outline-none"
+              />
+
+              {pinError && (
+                <div className="text-[11px] font-semibold text-rose-600 text-center">
+                  {pinError}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPinModal(false);
+                    setPinInput("");
+                    setPinError("");
+                  }}
+                  className="flex-1 py-2 text-xs font-semibold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={!pinInput.trim()}
+                  className="flex-1 py-2 text-xs font-semibold rounded-xl bg-rose-600 hover:bg-rose-500 text-white disabled:opacity-40"
+                >
+                  Verifikasi
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

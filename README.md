@@ -109,10 +109,12 @@ PORT=5175
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-SYNC_SECRET_KEY=warung_madura_sync_secret_2026
+SYNC_SECRET_KEY=tok_live_ganti_dengan_secret_acak_anda
 INVOICE_RETENTION_HOURS=12
 ```
 > **Catatan**: Nilai `SYNC_SECRET_KEY` di `invoice_publik/.env` **HARUS SAMA** dengan `SYNC_SECRET_KEY` di `pos_warung_madura/.env`.
+> Anda dapat membuat secret acak 256-bit dengan perintah:
+> `node -e "console.log('tok_live_' + require('crypto').randomBytes(32).toString('hex'))"`
 
 ---
 

@@ -50,7 +50,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Print thermal styling: hanya cetak struk barcode fisik secara bersih */
+/* Print thermal & receipt styling: cetak struk barcode, nota lengkap, atau struk uji secara bersih */
 @media print {
   @page {
     margin: 0;
@@ -69,11 +69,17 @@ body {
   }
 
   #printable-barcode-receipt,
-  #printable-barcode-receipt * {
+  #printable-barcode-receipt *,
+  #printable-full-receipt,
+  #printable-full-receipt *,
+  #printable-test-receipt,
+  #printable-test-receipt * {
     visibility: visible;
   }
 
-  #printable-barcode-receipt {
+  #printable-barcode-receipt,
+  #printable-full-receipt,
+  #printable-test-receipt {
     position: absolute;
     left: 0;
     top: 0;

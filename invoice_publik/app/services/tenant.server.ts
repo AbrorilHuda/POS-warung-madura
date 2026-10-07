@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { getSupabaseClient } from "./supabase.server";
 import type {
   Tenant,
@@ -28,11 +29,7 @@ function generateStoreCode(storeName: string): string {
 }
 
 function generateSyncSecret(): string {
-  const chars = "abcdef0123456789";
-  let secret = "";
-  for (let i = 0; i < 32; i++) {
-    secret += chars[Math.floor(Math.random() * chars.length)];
-  }
+  const secret = crypto.randomBytes(32).toString("hex");
   return `tok_live_${secret}`;
 }
 

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
@@ -141,12 +142,12 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
   try {
     await connection.beginTransaction();
 
-    // 1. Simpan Header Sales
+    // 1. Simpan Header Sales (termasuk customer_id jika kasbon / langganan)
     await connection.execute(`
       INSERT INTO sales (
         id, invoice_code, total_amount, paid_amount, change_amount, 
-        payment_method, cashier_name, sync_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        payment_method, customer_id, customer_name, cashier_name, sync_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       sale.id,
       sale.invoiceCode,
@@ -154,9 +155,32 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
       sale.paidAmount,
       sale.changeAmount,
       sale.paymentMethod,
+      sale.customerId || null,
+      sale.customerName || null,
       sale.cashierName,
       sale.syncStatus,
     ]);
+
+    // 1b. Jika pembayaran adalah Kasbon atau pembayaran sebagian dengan sisa utang (PRD F1.2 & F1.3)
+    const debtAmount = Math.max(0, sale.totalAmount - sale.paidAmount);
+    if ((sale.paymentMethod === "Kasbon" || sale.paymentMethod === "Hutang" || debtAmount > 0) && debtAmount > 0) {
+      if (!sale.customerId) {
+        throw new Error("Transaksi kasbon / utang wajib memilih data pelanggan!");
+      }
+      const receivableId = crypto.randomUUID();
+      await connection.execute(`
+        INSERT INTO receivables (
+          id, customer_id, sale_id, invoice_code, amount, paid_amount, due_date, status, notes
+        ) VALUES (?, ?, ?, ?, ?, 0, DATE_ADD(CURDATE(), INTERVAL 14 DAY), 'open', ?)
+      `, [
+        receivableId,
+        sale.customerId,
+        sale.id,
+        sale.invoiceCode,
+        debtAmount,
+        `Kasbon nota ${sale.invoiceCode}`,
+      ]);
+    }
 
     // 2. Simpan Sale Items & Ledger Mutasi Keluar
     for (const item of sale.items) {
@@ -353,7 +377,8 @@ export async function getSalesFromDb(): Promise<Sale[]> {
     SELECT 
       id, invoice_code AS invoiceCode, total_amount AS totalAmount,
       paid_amount AS paidAmount, change_amount AS changeAmount,
-      payment_method AS paymentMethod, cashier_name AS cashierName,
+      payment_method AS paymentMethod, customer_id AS customerId,
+      customer_name AS customerName, cashier_name AS cashierName,
       sync_status AS syncStatus,
       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS timestamp
     FROM sales
@@ -380,6 +405,8 @@ export async function getSalesFromDb(): Promise<Sale[]> {
     paidAmount: Number(s.paidAmount),
     changeAmount: Number(s.changeAmount),
     paymentMethod: s.paymentMethod,
+    customerId: s.customerId || undefined,
+    customerName: s.customerName || undefined,
     syncStatus: s.syncStatus,
     cashierName: s.cashierName,
     items: itemRows
@@ -499,6 +526,85 @@ export function getSyncSecretKey(): string {
 export function getSyncApiUrl(): string {
   reloadEnv();
   return (process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync").trim();
+}
+
+export interface InstallationIdentity {
+  storeId: string;
+  deviceKey: string;
+  createdAt: string;
+}
+
+let cachedIdentity: InstallationIdentity | null = null;
+
+/**
+ * Mendapatkan atau membuat identitas instalasi unik (store_id UUID & device_key 256-bit)
+ * Disimpan permanen di tabel store_settings MySQL lokal (PRD T1.2)
+ */
+export async function getOrCreateInstallationIdentity(): Promise<InstallationIdentity> {
+  if (cachedIdentity) return cachedIdentity;
+
+  try {
+    const rows = await query<RowDataPacket[]>(
+      `SELECT setting_key, setting_value FROM store_settings WHERE setting_key IN ('installation_store_id', 'installation_device_key', 'installation_created_at')`
+    );
+
+    const map: Record<string, string> = {};
+    for (const r of rows) {
+      map[r.setting_key] = r.setting_value;
+    }
+
+    let storeId = map["installation_store_id"];
+    let deviceKey = map["installation_device_key"];
+    let createdAt = map["installation_created_at"];
+    const now = new Date().toISOString();
+
+    if (!storeId) {
+      storeId = crypto.randomUUID();
+      await query(
+        `INSERT INTO store_settings (setting_key, setting_value) VALUES ('installation_store_id', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+        [storeId]
+      );
+    }
+
+    if (!deviceKey) {
+      // Kunci perangkat acak 256-bit (32 bytes hex)
+      deviceKey = crypto.randomBytes(32).toString("hex");
+      await query(
+        `INSERT INTO store_settings (setting_key, setting_value) VALUES ('installation_device_key', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+        [deviceKey]
+      );
+    }
+
+    if (!createdAt) {
+      createdAt = now;
+      await query(
+        `INSERT INTO store_settings (setting_key, setting_value) VALUES ('installation_created_at', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+        [createdAt]
+      );
+    }
+
+    cachedIdentity = { storeId, deviceKey, createdAt };
+    return cachedIdentity;
+  } catch (err) {
+    const storeId = process.env.STORE_ID || "store-" + (process.env.STORE_CODE || "WM01");
+    const deviceKey = crypto.randomBytes(32).toString("hex");
+    return { storeId, deviceKey, createdAt: new Date().toISOString() };
+  }
+}
+
+/**
+ * Merotasi kunci perangkat (device_key) tanpa menghilangkan transaksi pending (PRD T1.5)
+ */
+export async function rotateDeviceKey(): Promise<InstallationIdentity> {
+  const newDeviceKey = crypto.randomBytes(32).toString("hex");
+  await query(
+    `INSERT INTO store_settings (setting_key, setting_value) VALUES ('installation_device_key', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+    [newDeviceKey]
+  );
+  if (cachedIdentity) {
+    cachedIdentity.deviceKey = newDeviceKey;
+  }
+  return getOrCreateInstallationIdentity();
 }
 
 export interface StoreConfig {
@@ -842,11 +948,13 @@ export async function pushSaleToPublicInvoice(sale: Sale): Promise<PushSaleResul
     };
   }
 
+  const identity = await getOrCreateInstallationIdentity();
   const syncUrl = getSyncApiUrl();
 
   try {
     const payload = {
       secretKey: syncSecret,
+      storeId: identity.storeId,
       invoice: {
         id: sale.invoiceCode,
         storeName: storeConfig.storeName,
@@ -867,13 +975,23 @@ export async function pushSaleToPublicInvoice(sale: Sale): Promise<PushSaleResul
       },
     };
 
+    const rawPayload = JSON.stringify(payload);
+    const timestamp = Date.now().toString();
+    const signature = crypto
+      .createHmac("sha256", syncSecret)
+      .update(`${timestamp}.${rawPayload}`)
+      .digest("hex");
+
     const res = await fetch(syncUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-sync-secret": syncSecret,
+        "x-sync-store-id": identity.storeId,
+        "x-sync-timestamp": timestamp,
+        "x-sync-signature": signature,
       },
-      body: JSON.stringify(payload),
+      body: rawPayload,
       signal: AbortSignal.timeout(4000),
     });
 

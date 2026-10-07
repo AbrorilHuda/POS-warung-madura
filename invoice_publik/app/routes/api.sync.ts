@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   saveInvoiceSnapshot,
@@ -6,6 +7,7 @@ import {
   cleanupExpiredInvoices,
 } from "../services/supabase.server";
 import { validateSyncSecret, incrementInvoiceCount } from "../services/tenant.server";
+import { checkRateLimit } from "../services/rate-limit.server";
 import type { SyncPayload } from "../types/invoice";
 
 /**
@@ -87,9 +89,16 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    // 1. Baca secret dari header (atau body untuk backward compat)
+    // 1. Baca raw body dan secret dari header / body
+    const rawBody = await request.text();
+    let body: SyncPayload;
+    try {
+      body = JSON.parse(rawBody) as SyncPayload;
+    } catch {
+      return Response.json({ ok: false, error: "Payload JSON tidak valid" }, { status: 400 });
+    }
+
     const authHeader = request.headers.get("x-sync-secret") || "";
-    const body = (await request.json()) as SyncPayload;
     const syncSecret = authHeader || body.secretKey || "";
 
     // 2. Validasi multi-tenant
@@ -122,6 +131,43 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const tenant = validation.tenant!;
+
+    // 2a. Rate Limiting per tenant (T1.4)
+    const rateCheck = checkRateLimit(`tenant:${tenant.id}`);
+    if (!rateCheck.allowed) {
+      return Response.json(
+        { ok: false, error: "Terlalu banyak permintaan sinkronisasi (rate limit terlampaui)", errorCode: "RATE_LIMITED" },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rateCheck.resetMs / 1000)) } }
+      );
+    }
+
+    // 2b. Verifikasi Tanda Tangan HMAC-SHA256 (T1.3 & T1.4) jika disediakan
+    const signatureHeader = request.headers.get("x-sync-signature") || "";
+    const timestampHeader = request.headers.get("x-sync-timestamp") || "";
+    if (signatureHeader && timestampHeader) {
+      const timestampNum = Number(timestampHeader);
+      const diff = Math.abs(Date.now() - timestampNum);
+      if (isNaN(timestampNum) || diff > 5 * 60 * 1000) {
+        return Response.json(
+          { ok: false, error: "Permintaan kadaluarsa atau timestamp tidak valid (maks 5 menit)", errorCode: "TIMESTAMP_EXPIRED" },
+          { status: 401 }
+        );
+      }
+
+      const expectedHmac = crypto
+        .createHmac("sha256", tenant.sync_secret)
+        .update(`${timestampHeader}.${rawBody}`)
+        .digest("hex");
+
+      const expBuf = Buffer.from(expectedHmac);
+      const sigBuf = Buffer.from(signatureHeader);
+      if (expBuf.length !== sigBuf.length || !crypto.timingSafeEqual(expBuf, sigBuf)) {
+        return Response.json(
+          { ok: false, error: "Tanda tangan permintaan (HMAC signature) tidak cocok", errorCode: "INVALID_SIGNATURE" },
+          { status: 401 }
+        );
+      }
+    }
 
     // 3. Validasi payload invoice
     if (!body.invoice || !body.invoice.id) {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Printer,
   CheckCircle2,
@@ -13,10 +13,16 @@ import {
   Check,
   Store,
   Leaf,
+  Sliders,
+  DollarSign,
+  AlertCircle,
+  RefreshCw,
+  FileText,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Sale } from "../types/pos";
 import type { StoreConfig } from "../services/pos.server";
+import { PrinterSettingsModal } from "./PrinterSettingsModal";
 
 interface ReceiptModalProps {
   sale: Sale | null;
@@ -35,6 +41,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 }) => {
   const [viewMode, setViewMode] = useState<"barcode" | "digitalInvoice">("barcode");
   const [copied, setCopied] = useState(false);
+  const [isPrinterSettingsOpen, setIsPrinterSettingsOpen] = useState(false);
+  const [isPrintingThermal, setIsPrintingThermal] = useState(false);
+  const [thermalToast, setThermalToast] = useState<{
+    type: "success" | "error" | "info";
+    message: string;
+  } | null>(null);
+  const autoPrintCheckedRef = useRef<string | null>(null);
 
   if (!isOpen || !sale) return null;
 
@@ -72,6 +85,78 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     window.print();
   };
 
+  const handlePrintThermal = async (isCopy = false) => {
+    if (!sale) return;
+    try {
+      setIsPrintingThermal(true);
+      setThermalToast({ type: "info", message: isCopy ? "Sedang mencetak salinan nota..." : "Sedang mengirim nota ke printer thermal..." });
+
+      const fd = new FormData();
+      fd.append("intent", "print_sale");
+      fd.append("sale", JSON.stringify(sale));
+      fd.append("is_copy", isCopy ? "true" : "false");
+
+      const res = await fetch("/api/printer", {
+        method: "POST",
+        body: fd,
+      });
+      const json = await res.json();
+
+      if (json.ok) {
+        setThermalToast({
+          type: "success",
+          message: json.message || (isCopy ? "Salinan struk berhasil dicetak!" : "Struk thermal berhasil dicetak!"),
+        });
+        setTimeout(() => setThermalToast(null), 4000);
+      } else {
+        setThermalToast({
+          type: "error",
+          message: json.message || "Printer tidak merespons. Periksa koneksi printer atau gunakan cetak ulang nanti.",
+        });
+      }
+    } catch (err: any) {
+      setThermalToast({
+        type: "error",
+        message: err.message || "Gagal menghubungi server printer.",
+      });
+    } finally {
+      setIsPrintingThermal(false);
+    }
+  };
+
+  const handleOpenCashDrawer = async () => {
+    try {
+      const fd = new FormData();
+      fd.append("intent", "open_cash_drawer");
+      const res = await fetch("/api/printer", { method: "POST", body: fd });
+      const json = await res.json();
+      if (json.ok) {
+        setThermalToast({ type: "success", message: "Laci uang berhasil dibuka!" });
+        setTimeout(() => setThermalToast(null), 3000);
+      } else {
+        setThermalToast({ type: "error", message: json.message || "Gagal membuka laci uang." });
+      }
+    } catch (e: any) {
+      setThermalToast({ type: "error", message: "Gagal membuka laci uang." });
+    }
+  };
+
+  // Auto-Print saat transaksi selesai (PRD F9.2)
+  useEffect(() => {
+    if (isOpen && sale && autoPrintCheckedRef.current !== sale.id) {
+      autoPrintCheckedRef.current = sale.id;
+      // Cek apakah autoPrint aktif di server
+      fetch("/api/printer")
+        .then((r) => r.json())
+        .then((json) => {
+          if (json.ok && json.settings?.autoPrint) {
+            handlePrintThermal(false);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, sale]);
+
   const handleShareWhatsApp = () => {
     const storeDisplayName = storeConfig?.storeName?.toUpperCase() || "WARUNG MADURA";
     const waText = encodeURIComponent(
@@ -106,38 +191,80 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             </div>
           </div>
 
-          {/* Mode Switcher */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+          {/* Mode Switcher & Printer Settings */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+              <button
+                onClick={() => setViewMode("barcode")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${viewMode === "barcode"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-500 hover:text-slate-900"
+                  }`}
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>Struk Barcode</span>
+              </button>
+              <button
+                onClick={() => setViewMode("digitalInvoice")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${viewMode === "digitalInvoice"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-500 hover:text-slate-900"
+                  }`}
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                <span>Tampilan Nota</span>
+              </button>
+            </div>
+
             <button
-              onClick={() => setViewMode("barcode")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${viewMode === "barcode"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-500 hover:text-slate-900"
-                }`}
+              onClick={() => setIsPrinterSettingsOpen(true)}
+              className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
+              title="Pengaturan Printer Thermal (F9)"
             >
-              <QrCode className="w-3.5 h-3.5" />
-              <span>Struk Barcode</span>
+              <Sliders className="w-4 h-4" />
             </button>
+
             <button
-              onClick={() => setViewMode("digitalInvoice")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${viewMode === "digitalInvoice"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-500 hover:text-slate-900"
-                }`}
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+              title="Tutup"
             >
-              <Receipt className="w-3.5 h-3.5" />
-              <span>Tampilan Nota</span>
+              <X className="w-5 h-5" />
             </button>
           </div>
-
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition"
-            title="Tutup"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
+
+        {/* Realtime Thermal Print Toast */}
+        {thermalToast && (
+          <div
+            className={`px-5 py-2 text-xs font-semibold flex items-center justify-between border-b transition-all ${
+              thermalToast.type === "success"
+                ? "bg-emerald-900 text-emerald-100 border-emerald-800"
+                : thermalToast.type === "error"
+                ? "bg-rose-900 text-rose-100 border-rose-800"
+                : "bg-slate-900 text-slate-100 border-slate-800"
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  thermalToast.type === "success"
+                    ? "bg-emerald-400"
+                    : thermalToast.type === "error"
+                    ? "bg-rose-400 animate-pulse"
+                    : "bg-amber-400 animate-ping"
+                }`}
+              ></span>
+              {thermalToast.message}
+            </span>
+            <button
+              onClick={() => setThermalToast(null)}
+              className="text-[10px] bg-white/10 hover:bg-white/20 text-white px-2 py-0.5 rounded cursor-pointer transition"
+            >
+              Tutup
+            </button>
+          </div>
+        )}
 
         {/* Modal Body */}
         <div className="p-4 sm:p-5 bg-slate-50 flex flex-col items-center max-h-[72vh] overflow-y-auto">
@@ -161,6 +288,26 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   {storeConfig?.storeAddress || "Jl. Raya Warung Madura No. 24"}
                 </p>
               </div>
+
+              {/* Rincian Kasbon & Sisa Utang (PRD F1.10) */}
+              {(sale.paymentMethod === "Kasbon" || sale.paymentMethod === "Hutang" || sale.customerName) && (
+                <div className="py-2 border-b border-dashed border-slate-300 text-[10px] space-y-0.5">
+                  <div className="flex justify-between">
+                    <span>Pelanggan:</span>
+                    <span className="font-bold">{sale.customerName || "-"}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-rose-600">
+                    <span>Kasbon:</span>
+                    <span>Rp {Math.max(0, sale.totalAmount - sale.paidAmount).toLocaleString("id-ID")}</span>
+                  </div>
+                  {sale.customerDebtRemaining !== undefined && (
+                    <div className="flex justify-between font-black text-slate-900">
+                      <span>Total Sisa Utang:</span>
+                      <span>Rp {sale.customerDebtRemaining.toLocaleString("id-ID")}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
 
               {/* AREA QR CODE UTAMA (Scan untuk Buka Nota Lengkap di HP) */}
@@ -206,7 +353,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             /* ========================================================================= */
             /* 2. TAMPILAN NOTA LENGKAP (SESUAI DESAIN INVOICE PUBLIK)                   */
             /* ========================================================================= */
-            <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden text-slate-900 font-sans">
+            <div
+              id="printable-full-receipt"
+              className="w-full max-w-md bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden text-slate-900 font-sans"
+            >
               {/* Header Warung Gradient */}
               <div className="bg-gradient-to-b from-slate-900 to-slate-950 text-white p-5 text-center relative">
                 <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/20 text-white flex items-center justify-center mx-auto mb-2 backdrop-blur-xs">
@@ -339,6 +489,36 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     </div>
                   </div>
                 )}
+
+                {/* Info Kasbon & Sisa Utang Pelanggan (PRD F1.10) */}
+                {(sale.paymentMethod === "Kasbon" || sale.paymentMethod === "Hutang" || sale.customerName) && (
+                  <div className="pt-2 border-t border-dashed border-amber-300 text-xs space-y-1 bg-amber-50/70 p-2.5 rounded-xl">
+                    <div className="flex justify-between font-medium text-amber-950">
+                      <span>Pelanggan Langganan:</span>
+                      <span className="font-bold">{sale.customerName || "-"}</span>
+                    </div>
+                    {sale.paidAmount > 0 && (
+                      <div className="flex justify-between text-slate-600">
+                        <span>Bayar Tunai Dimuka:</span>
+                        <span className="font-mono">Rp {sale.paidAmount.toLocaleString("id-ID")}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-rose-700 font-bold">
+                      <span>Kasbon Nota Ini:</span>
+                      <span className="font-mono">
+                        Rp {Math.max(0, sale.totalAmount - sale.paidAmount).toLocaleString("id-ID")}
+                      </span>
+                    </div>
+                    {sale.customerDebtRemaining !== undefined && (
+                      <div className="flex justify-between text-amber-950 font-black pt-1 border-t border-amber-200/80">
+                        <span>Total Sisa Utang Pelanggan:</span>
+                        <span className="font-mono text-rose-600">
+                          Rp {sale.customerDebtRemaining.toLocaleString("id-ID")}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Barcode & Aksi Eksternal */}
@@ -389,13 +569,52 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
         {/* Modal Footer Controls */}
         <div className="px-5 py-3.5 border-t border-slate-100 bg-white flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Tombol Utama: Cetak Thermal ESC/POS (PRD F9.1) */}
+            <button
+              onClick={() => handlePrintThermal(false)}
+              disabled={isPrintingThermal}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              {isPrintingThermal ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+              ) : (
+                <Printer className="w-3.5 h-3.5 text-emerald-400" />
+              )}
+              <span>Cetak Thermal</span>
+            </button>
+
+            {/* Tombol Cetak Salinan (PRD F9.4) */}
+            <button
+              onClick={() => handlePrintThermal(true)}
+              disabled={isPrintingThermal}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer"
+              title="Cetak Salinan Nota (Watermark Copy)"
+            >
+              <Copy className="w-3.5 h-3.5 text-blue-500" />
+              <span>Salinan</span>
+            </button>
+
+            {/* Tombol Buka Laci Kasir (PRD F9.5) */}
+            {sale.paymentMethod === "Tunai" && (
+              <button
+                onClick={handleOpenCashDrawer}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-100/50 text-emerald-800 text-xs font-semibold transition cursor-pointer"
+                title="Buka Laci Uang Kasir (Cash Drawer Kick)"
+              >
+                <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Buka Laci</span>
+              </button>
+            )}
+
+            {/* Tombol Cetak Browser / Simpan PDF Asli (Cocok jika belum punya printer thermal) */}
             <button
               onClick={handlePrint}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer"
+              title="Cetak via Dialog Browser Sistem atau Simpan sebagai file PDF Asli (Ctrl+P)"
             >
-              <Printer className="w-3.5 h-3.5" />
-              <span>Cetak Struk Barcode</span>
+              <FileText className="w-3.5 h-3.5 text-slate-500" />
+              <span>Simpan PDF / Browser</span>
             </button>
 
             <button
@@ -434,6 +653,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Modal Konfigurasi Printer Thermal (PRD F9.2) */}
+        <PrinterSettingsModal
+          isOpen={isPrinterSettingsOpen}
+          onClose={() => setIsPrinterSettingsOpen(false)}
+        />
       </div>
     </div>
   );

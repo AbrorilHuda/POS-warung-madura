@@ -27,6 +27,7 @@ import { ProductCatalog } from "../components/ProductCatalog";
 import { Kulakan } from "../components/Kulakan";
 import { StokOpname } from "../components/StokOpname";
 import { Laporan } from "../components/Laporan";
+import { PelangganKasbon } from "../components/PelangganKasbon";
 import { ReceiptModal } from "../components/ReceiptModal";
 import { QuickAddModal } from "../components/QuickAddModal";
 import { ConnectPhoneScannerModal } from "../components/ConnectPhoneScannerModal";
@@ -246,7 +247,7 @@ export default function Home() {
   const navigation = useNavigation();
 
   const [activeTab, setActiveTab] = useState<
-    "kasir" | "katalog" | "kulakan" | "opname" | "laporan"
+    "kasir" | "katalog" | "kulakan" | "opname" | "kasbon" | "laporan"
   >("kasir");
 
   // Local synced state from loaderData
@@ -505,6 +506,9 @@ export default function Home() {
         e.preventDefault();
         setActiveTab("opname");
       } else if (e.key === "F6") {
+        e.preventDefault();
+        setActiveTab("kasbon");
+      } else if (e.key === "F7") {
         e.preventDefault();
         setActiveTab("laporan");
       } else if (e.key === "Escape") {
@@ -793,6 +797,10 @@ export default function Home() {
             products={products}
             onApplyOpnameAdjustment={handleApplyOpnameAdjustment}
           />
+        )}
+
+        {activeTab === "kasbon" && (
+          <PelangganKasbon />
         )}
 
         {activeTab === "laporan" && (

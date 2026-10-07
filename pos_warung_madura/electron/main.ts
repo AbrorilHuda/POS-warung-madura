@@ -22,6 +22,7 @@
 import { app, BrowserWindow, dialog } from "electron";
 import path from "path";
 import fs from "fs";
+import zlib from "zlib";
 import { spawn, type ChildProcess } from "child_process";
 import mysql from "mysql2/promise";
 
@@ -424,12 +425,80 @@ function createMainWindow(targetUrl: string): void {
 }
 
 // ----------------------------------------------------------------------------
-// 7. CLEAN GRACEFUL SHUTDOWN (MENCEGAH KERUSAKAN DATA INNODB)
+// 7. CLEAN GRACEFUL SHUTDOWN (MENCEGAH KERUSAKAN DATA INNODB & AUTO BACKUP T3.1)
 // ----------------------------------------------------------------------------
+async function createShutdownBackup(): Promise<void> {
+  try {
+    const baseDir = getMysqlBaseDir();
+    const mysqldumpExe = path.join(baseDir, "bin", "mysqldump.exe");
+    if (!fs.existsSync(mysqldumpExe)) return;
+
+    let backupDir = path.join(app.getPath("userData"), "backups");
+    try {
+      const conn = await mysql.createConnection({
+        host: MYSQL_HOST,
+        port: MYSQL_PORT,
+        user: DB_USER,
+        password: DB_PASSWORD,
+        database: DB_NAME,
+      });
+      const [rows] = await conn.query<any[]>(
+        "SELECT setting_value FROM store_settings WHERE setting_key = 'backup_directory' LIMIT 1"
+      );
+      await conn.end();
+      if (rows && rows.length > 0 && rows[0]?.setting_value) {
+        const customDir = rows[0].setting_value.trim();
+        if (customDir) backupDir = customDir;
+      }
+    } catch {}
+
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const dumpFile = path.join(backupDir, `pos_backup_${timestamp}_on_close.sql.gz`);
+
+    console.log("[Electron Main] Membuat backup otomatis sebelum aplikasi ditutup (PRD T3.1)...");
+    await new Promise<void>((resolve) => {
+      const proc = spawn(mysqldumpExe, [
+        `-h127.0.0.1`,
+        `-P${MYSQL_PORT}`,
+        `-u${DB_USER}`,
+        `--databases`,
+        DB_NAME,
+        `--add-drop-table`,
+        `--quick`,
+        `--single-transaction`,
+      ]);
+
+      const gzip = zlib.createGzip({ level: 9 });
+      const outStream = fs.createWriteStream(dumpFile);
+
+      proc.stdout.pipe(gzip).pipe(outStream);
+
+      proc.on("close", (code) => {
+        if (code === 0) {
+          console.log("[Electron Main] Backup otomatis saat tutup berhasil:", dumpFile);
+        }
+        resolve();
+      });
+      proc.on("error", () => resolve());
+    });
+  } catch (err) {
+    console.warn("[Electron Main] Gagal membuat backup saat shutdown:", err);
+  }
+}
+
 async function cleanShutdown(): Promise<void> {
   if (isShuttingDown) return;
   isShuttingDown = true;
   console.log("[Electron Main] Memulai proses shutdown aplikasi...");
+
+  // 0. Buat backup otomatis saat aplikasi ditutup (PRD T3.1) jika MySQL masih aktif
+  if (mysqlProcess) {
+    await createShutdownBackup();
+  }
 
   // 1. Matikan Node server child process
   if (serverProcess) {

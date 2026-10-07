@@ -54,7 +54,10 @@ export interface Sale {
   totalAmount: number;
   paidAmount: number;
   changeAmount: number;
-  paymentMethod: 'Tunai' | 'QRIS' | 'Hutang';
+  paymentMethod: 'Tunai' | 'QRIS' | 'Hutang' | 'Kasbon';
+  customerId?: string;
+  customerName?: string;
+  customerDebtRemaining?: number;
   syncStatus: 'synced' | 'pending' | 'failed';
   cashierName: string;
 }
@@ -90,3 +93,65 @@ export interface StockOpnameSession {
   notes: string;
   items: StockOpnameItem[];
 }
+
+// ----------------------------------------------------------------------------
+// TIPE DATA PELANGGAN & KASBON (PRD F1)
+// ----------------------------------------------------------------------------
+export interface Customer {
+  id: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  creditLimit: number;
+  isActive: boolean;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CustomerSummary extends Customer {
+  totalDebt: number;
+  unpaidInvoicesCount: number;
+  earliestDueDate?: string | null;
+  lastReceivableAt?: string | null;
+  isOverLimit: boolean;
+}
+
+export interface ReceivableItem {
+  id: string;
+  customerId: string;
+  saleId?: string | null;
+  invoiceCode?: string | null;
+  amount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  dueDate?: string | null;
+  status: 'open' | 'partial' | 'paid' | 'void';
+  notes?: string;
+  createdAt: string;
+}
+
+export interface ReceivablePayment {
+  id: string;
+  customerId: string;
+  receivableId?: string | null;
+  amount: number;
+  paymentMethod: 'Tunai' | 'Transfer' | 'QRIS';
+  notes?: string;
+  paidAt: string;
+  shiftId?: string | null;
+  createdBy: string;
+}
+
+export interface CustomerLedgerEntry {
+  id: string;
+  date: string;
+  type: 'kasbon' | 'pelunasan';
+  description: string;
+  debit: number; // Kasbon bertambah
+  credit: number; // Pelunasan dibayar
+  balance: number; // Saldo berjalan
+  invoiceCode?: string | null;
+  paymentMethod?: string | null;
+}
+

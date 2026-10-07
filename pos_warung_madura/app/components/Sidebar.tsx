@@ -16,13 +16,18 @@ import {
   Monitor,
   Sparkles,
   Info,
+  Database,
+  Users,
+  Printer,
 } from "lucide-react";
 import type { StoreConfig, CloudTenantInfo } from "../services/pos.server";
 import { CloudSaasModal } from "./CloudSaasModal";
+import { BackupModal } from "./BackupModal";
+import { PrinterSettingsModal } from "./PrinterSettingsModal";
 
 interface SidebarProps {
-  activeTab: "kasir" | "katalog" | "kulakan" | "opname" | "laporan";
-  setActiveTab: (tab: "kasir" | "katalog" | "kulakan" | "opname" | "laporan") => void;
+  activeTab: "kasir" | "katalog" | "kulakan" | "opname" | "kasbon" | "laporan";
+  setActiveTab: (tab: "kasir" | "katalog" | "kulakan" | "opname" | "kasbon" | "laporan") => void;
   pendingSyncCount: number;
   onTriggerSync: () => void;
   isSyncing: boolean;
@@ -53,6 +58,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [time, setTime] = useState<string>("");
   const [isSaasModalOpen, setIsSaasModalOpen] = useState(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
 
   useEffect(() => {
     const updateTime = () => {
@@ -74,7 +81,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: "katalog", label: "Produk & Satuan", icon: Package, hotkey: "F3" },
     { id: "kulakan", label: "Kulakan Masuk", icon: Truck, hotkey: "F4" },
     { id: "opname", label: "Stok Opname", icon: ClipboardCheck, hotkey: "F5" },
-    { id: "laporan", label: "Laporan & Omzet", icon: BarChart3, hotkey: "F6" },
+    { id: "kasbon", label: "Kasbon & Pelanggan", icon: Users, hotkey: "F6" },
+    { id: "laporan", label: "Laporan & Omzet", icon: BarChart3, hotkey: "F7" },
   ] as const;
 
   return (
@@ -173,6 +181,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
         </button>
 
+        {/* Backup & Restore Database Button (PRD T3) */}
+        <button
+          onClick={() => setIsBackupModalOpen(true)}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold transition cursor-pointer shadow-2xs"
+          title="Buka Pusat Backup & Restore Database"
+        >
+          <div className="flex items-center gap-2">
+            <Database className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Backup & Restore</span>
+          </div>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+            MySQL
+          </span>
+        </button>
+
         {/* Sync Status Button with Info Trigger */}
         <div className="flex items-center gap-1.5">
           <button
@@ -236,6 +259,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? "OK"
                     : "Off"}
             </span>
+          </button>
+
+          <button
+            onClick={() => setIsPrinterModalOpen(true)}
+            title="Pengaturan Printer Thermal Struk (F9)"
+            className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition cursor-pointer shrink-0"
+          >
+            <Printer className="w-3.5 h-3.5" />
           </button>
 
           <button
@@ -307,6 +338,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         pendingSyncCount={pendingSyncCount}
         onTriggerSync={onTriggerSync}
         isSyncing={isSyncing}
+      />
+
+      {/* Backup & Restore Database Modal (PRD T3) */}
+      <BackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+      />
+
+      {/* Printer Thermal Settings Modal (PRD F9) */}
+      <PrinterSettingsModal
+        isOpen={isPrinterModalOpen}
+        onClose={() => setIsPrinterModalOpen(false)}
       />
     </aside>
   );

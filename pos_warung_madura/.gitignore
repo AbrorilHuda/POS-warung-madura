@@ -18,3 +18,4 @@ prd.md
 # Local certs & logs
 /certs/
 *.log
+/backups

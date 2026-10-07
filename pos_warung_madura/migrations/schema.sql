@@ -93,14 +93,17 @@ CREATE TABLE IF NOT EXISTS sales (
   total_amount DECIMAL(14, 2) NOT NULL,
   paid_amount DECIMAL(14, 2) NOT NULL,
   change_amount DECIMAL(14, 2) NOT NULL DEFAULT 0,
-  payment_method ENUM('Tunai', 'QRIS', 'Hutang') DEFAULT 'Tunai',
+  payment_method ENUM('Tunai', 'QRIS', 'Hutang', 'Kasbon') DEFAULT 'Tunai',
+  customer_id VARCHAR(36) NULL,
+  customer_name VARCHAR(255) NULL,
   cashier_name VARCHAR(100) DEFAULT 'Cak Mat',
   sync_status ENUM('pending', 'synced', 'failed') DEFAULT 'pending',
   synced_at TIMESTAMP NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE INDEX uq_sales_invoice_code (invoice_code),
   INDEX idx_sales_sync_status (sync_status),
-  INDEX idx_sales_created (created_at)
+  INDEX idx_sales_created (created_at),
+  INDEX idx_sales_customer (customer_id)
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
@@ -165,6 +168,68 @@ CREATE TABLE IF NOT EXISTS stock_opname_items (
     ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
+-- ----------------------------------------------------------------------------
+-- 9. Tabel: customers (Master Pelanggan & Kasbon — PRD F1.1)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS customers (
+  id VARCHAR(36) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  phone VARCHAR(50) NULL,
+  address TEXT NULL,
+  credit_limit DECIMAL(14, 2) DEFAULT 0, -- 0 = tanpa batas limit
+  is_active BOOLEAN DEFAULT TRUE,
+  notes TEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_customers_name (name),
+  INDEX idx_customers_phone (phone)
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- 10. Tabel: receivables (Buku Besar Piutang / Kasbon — PRD F1.4)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS receivables (
+  id VARCHAR(36) PRIMARY KEY,
+  customer_id VARCHAR(36) NOT NULL,
+  sale_id VARCHAR(36) NULL,
+  invoice_code VARCHAR(50) NULL,
+  amount DECIMAL(14, 2) NOT NULL,
+  paid_amount DECIMAL(14, 2) NOT NULL DEFAULT 0,
+  due_date DATE NULL,
+  status ENUM('open', 'partial', 'paid', 'void') DEFAULT 'open',
+  notes TEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_receivables_customer (customer_id),
+  INDEX idx_receivables_sale (sale_id),
+  INDEX idx_receivables_status (status),
+  INDEX idx_receivables_due_date (due_date),
+  CONSTRAINT fk_receivables_customer
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+    ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- 11. Tabel: receivable_payments (Riwayat Pembayaran / Pelunasan Kasbon — PRD F1.5)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS receivable_payments (
+  id VARCHAR(36) PRIMARY KEY,
+  customer_id VARCHAR(36) NOT NULL,
+  receivable_id VARCHAR(36) NULL,
+  amount DECIMAL(14, 2) NOT NULL,
+  payment_method ENUM('Tunai', 'Transfer', 'QRIS') DEFAULT 'Tunai',
+  notes TEXT NULL,
+  paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  shift_id VARCHAR(36) NULL,
+  created_by VARCHAR(100) DEFAULT 'Kasir',
+  INDEX idx_rec_pay_customer (customer_id),
+  INDEX idx_rec_pay_receivable (receivable_id),
+  INDEX idx_rec_pay_paid_at (paid_at),
+  CONSTRAINT fk_rec_pay_customer
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+    ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
 -- ============================================================================
 -- SQL VIEW HELPER: v_product_current_stocks
 -- Menghitung stok terkini tiap produk secara realtime dari ledger mutasi.
@@ -183,13 +248,35 @@ WHERE p.is_active = TRUE
 GROUP BY p.id, p.name, p.category, p.base_unit, p.min_stock_alert;
 
 -- ============================================================================
+-- SQL VIEW HELPER: v_customer_receivables_summary (PRD F1.4)
+-- Menghitung total saldo utang berjalan per pelanggan dari buku besar
+-- ============================================================================
+CREATE OR REPLACE VIEW v_customer_receivables_summary AS
+SELECT 
+  c.id AS customer_id,
+  c.name,
+  c.phone,
+  c.address,
+  c.credit_limit,
+  c.is_active,
+  COALESCE(SUM(CASE WHEN r.status IN ('open', 'partial') THEN (r.amount - r.paid_amount) ELSE 0 END), 0) AS total_debt,
+  COALESCE(COUNT(CASE WHEN r.status IN ('open', 'partial') THEN 1 ELSE NULL END), 0) AS unpaid_invoices_count,
+  MIN(CASE WHEN r.status IN ('open', 'partial') THEN r.due_date ELSE NULL END) AS earliest_due_date,
+  MAX(r.created_at) AS last_receivable_at
+FROM customers c
+LEFT JOIN receivables r ON c.id = r.customer_id
+GROUP BY c.id, c.name, c.phone, c.address, c.credit_limit, c.is_active;
+
+-- ============================================================================
 -- KONFIGURASI AWAL (STORE SETTINGS)
 -- ============================================================================
 INSERT INTO store_settings (setting_key, setting_value) VALUES
   ('store_code', 'WM01'),
   ('store_name', 'Warung Madura Berkah'),
   ('store_address', 'Jl. Raya Kalianget No. 88, Sumenep'),
-  ('receipt_footer', 'Matur Sembah Nuwun! Buka 24 Jam Non-Stop')
+  ('receipt_footer', 'Matur Sembah Nuwun! Buka 24 Jam Non-Stop'),
+  ('owner_pin', '1234'),
+  ('kasbon_due_days', '14')
 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
 
 -- Catatan: Master produk & transaksi dibiarkan bersih/kosong agar kasir
