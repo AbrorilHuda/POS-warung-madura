@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { Route } from "./+types/home";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { useLoaderData, useSubmit, useNavigation, useActionData } from "react-router";
@@ -21,6 +21,7 @@ import {
   getStoreConfig,
   type StoreConfig,
 } from "../services/pos.server";
+import { getShiftSecuritySettings } from "../services/shift.server";
 import { Sidebar } from "../components/Sidebar";
 import { KasirPOS } from "../components/KasirPOS";
 import { ProductCatalog } from "../components/ProductCatalog";
@@ -31,6 +32,9 @@ import { PelangganKasbon } from "../components/PelangganKasbon";
 import { ReceiptModal } from "../components/ReceiptModal";
 import { QuickAddModal } from "../components/QuickAddModal";
 import { ConnectPhoneScannerModal } from "../components/ConnectPhoneScannerModal";
+import { ShiftModal } from "../components/ShiftModal";
+import { OnboardingSetupModal } from "../components/OnboardingSetupModal";
+import { VoidReturnModal } from "../components/VoidReturnModal";
 import { sendCustomerDisplayEvent } from "../services/customerDisplaySync";
 import type {
   Product,
@@ -38,6 +42,7 @@ import type {
   Sale,
   StockMovement,
   StockOpnameItem,
+  ShiftSecuritySettings,
 } from "../types/pos";
 
 export function meta({ }: Route.MetaArgs) {
@@ -77,6 +82,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cloudStatus = await testCloudConnection();
   const localIp = getLocalIpAddress();
   const storeConfig = getStoreConfig();
+  let securitySettings: ShiftSecuritySettings = {
+    isSetupCompleted: true,
+    requireCashierPin: false,
+    hasOwnerPin: false,
+    ownerName: storeConfig.ownerName || "Pemilik",
+    ownerHasRecoveryCode: false,
+  };
+  try {
+    if (dbStatus.ok) {
+      securitySettings = await getShiftSecuritySettings();
+    }
+  } catch (e) {
+    console.warn("Gagal load shift security settings:", e);
+  }
 
   if (dbStatus.ok) {
     try {
@@ -98,6 +117,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         stockMovements: stockMovements,
         detectedIp: localIp,
         storeConfig,
+        securitySettings,
       };
     } catch (err: any) {
       console.error("Gagal load data dari MySQL:", err);
@@ -113,6 +133,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         stockMovements: [] as StockMovement[],
         detectedIp: localIp,
         storeConfig,
+        securitySettings,
       };
     }
   }
@@ -129,6 +150,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     stockMovements: [] as StockMovement[],
     detectedIp: localIp,
     storeConfig,
+    securitySettings,
   };
 }
 
@@ -233,6 +255,10 @@ export async function action({ request }: ActionFunctionArgs) {
       };
     }
 
+    if (intent === "refresh_data") {
+      return { ok: true, intent, message: "Data berhasil diperbarui" };
+    }
+
     return { ok: false, error: "Aksi tidak dikenal", intent: null };
   } catch (err: any) {
     console.error("Action error:", err);
@@ -274,6 +300,46 @@ export default function Home() {
     type: "success" | "error" | "info";
     message: string;
   } | null>(null);
+
+  // Shift Kasir & Void/Return Modal States (PRD F5 & F6)
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+  const [isVoidReturnModalOpen, setIsVoidReturnModalOpen] = useState(false);
+  const [selectedInvoiceForVoid, setSelectedInvoiceForVoid] = useState<string>("");
+  const [activeShift, setActiveShift] = useState<any>(null);
+
+  // Setup Awal Onboarding Wizard Modal (PRD F5.1)
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
+    return loaderData.securitySettings ? !loaderData.securitySettings.isSetupCompleted : false;
+  });
+
+  const handleOnboardingCompleted = useCallback((_settings: ShiftSecuritySettings) => {
+    setIsOnboardingOpen(false);
+    // Reload halaman secara bersih via browser agar MySQL & environment langsung aktif tanpa bentrok TurboStream
+    window.location.href = "/";
+  }, []);
+
+  const handleShiftStatusChange = useCallback((shift: any) => {
+    setActiveShift((prev: any) => {
+      if (
+        prev?.id === shift?.id &&
+        prev?.status === shift?.status &&
+        prev?.expectedCash === shift?.expectedCash &&
+        prev?.cashierName === shift?.cashierName
+      ) {
+        return prev;
+      }
+      return shift;
+    });
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/shift")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok && d.activeShift) setActiveShift(d.activeShift);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (actionData && "intent" in actionData && actionData.intent === "sync_cloud") {
@@ -710,6 +776,12 @@ export default function Home() {
         cloudMessage={loaderData.cloudMessage}
         cloudTenant={loaderData.cloudTenant}
         storeConfig={loaderData.storeConfig}
+        onOpenShiftModal={() => setIsShiftModalOpen(true)}
+        activeShiftName={activeShift ? activeShift.cashierName : null}
+        onOpenVoidReturnModal={() => {
+          setSelectedInvoiceForVoid("");
+          setIsVoidReturnModalOpen(true);
+        }}
       />
 
       {/* Main Content */}
@@ -762,6 +834,8 @@ export default function Home() {
             products={products}
             nextInvoiceSeq={nextInvoiceSeq}
             storeConfig={loaderData.storeConfig}
+            activeShift={activeShift}
+            onRequireOpenShift={() => setIsShiftModalOpen(true)}
             onAddNewProduct={handleAddProduct}
             onRecordSale={handleRecordSale}
             onRequestUnknownBarcode={handleRequestUnknownBarcode}
@@ -818,6 +892,10 @@ export default function Home() {
             }}
             onSyncAllSales={handleTriggerSync}
             isSyncing={isSyncing}
+            onVoidOrReturnSale={(inv) => {
+              setSelectedInvoiceForVoid(inv);
+              setIsVoidReturnModalOpen(true);
+            }}
           />
         )}
       </main>
@@ -857,6 +935,37 @@ export default function Home() {
         isPhoneConnected={isPhoneConnected}
         phoneDeviceName={phoneDeviceName}
         detectedIp={(loaderData as any).detectedIp}
+      />
+
+      {/* Shift Kasir & Rekonsiliasi Kas Laci Modal (PRD F5) */}
+      <ShiftModal
+        isOpen={isShiftModalOpen}
+        onClose={() => setIsShiftModalOpen(false)}
+        onShiftStatusChange={handleShiftStatusChange}
+      />
+
+      {/* Retur Barang & Void Transaksi Modal (PRD F6) */}
+      <VoidReturnModal
+        isOpen={isVoidReturnModalOpen}
+        initialInvoiceCode={selectedInvoiceForVoid}
+        onClose={() => {
+          setIsVoidReturnModalOpen(false);
+          setSelectedInvoiceForVoid("");
+        }}
+        onSuccess={() => {
+          // Re-fetch transactions
+          const formData = new FormData();
+          formData.append("intent", "refresh_data");
+          submit(formData, { method: "post" });
+        }}
+      />
+
+      {/* Onboarding Wizard Setup Awal (PRD F5.1) */}
+      <OnboardingSetupModal
+        isOpen={isOnboardingOpen}
+        onCompleted={handleOnboardingCompleted}
+        defaultStoreName={loaderData.storeConfig?.storeName}
+        defaultStoreAddress={loaderData.storeConfig?.storeAddress}
       />
     </div>
   );

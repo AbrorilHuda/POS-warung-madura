@@ -7,6 +7,7 @@ export interface Tenant {
   store_code: string;
   store_slug: string;
   store_name: string;
+  owner_name?: string | null;
   store_address: string | null;
   owner_email: string | null;
   contact_wa: string | null;
@@ -24,12 +25,14 @@ export interface TenantPublicInfo {
   store_code: string;
   store_slug: string;
   store_name: string;
+  owner_name?: string | null;
   store_address: string | null;
   plan: "free" | "pro";
 }
 
 export interface RegisterTenantInput {
   store_name: string;
+  owner_name?: string;
   store_address: string;
   owner_email: string;
   contact_wa: string;

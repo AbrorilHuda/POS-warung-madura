@@ -10,8 +10,6 @@ import {
   CloudOff,
   RefreshCw,
   Clock,
-  Wifi,
-  Store,
   Smartphone,
   Monitor,
   Sparkles,
@@ -19,6 +17,8 @@ import {
   Database,
   Users,
   Printer,
+  Shield,
+  RotateCcw,
 } from "lucide-react";
 import type { StoreConfig, CloudTenantInfo } from "../services/pos.server";
 import { CloudSaasModal } from "./CloudSaasModal";
@@ -39,6 +39,9 @@ interface SidebarProps {
   cloudMessage?: string;
   cloudTenant?: CloudTenantInfo | null;
   storeConfig?: StoreConfig;
+  onOpenShiftModal?: () => void;
+  activeShiftName?: string | null;
+  onOpenVoidReturnModal?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -55,6 +58,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   cloudMessage,
   cloudTenant,
   storeConfig,
+  onOpenShiftModal,
+  activeShiftName,
+  onOpenVoidReturnModal,
 }) => {
   const [time, setTime] = useState<string>("");
   const [isSaasModalOpen, setIsSaasModalOpen] = useState(false);
@@ -140,8 +146,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
                 className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${isActive
-                    ? "bg-slate-900 text-white shadow-sm"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/70"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/70"
                   }`}
               >
                 <div className="flex items-center gap-2.5">
@@ -152,8 +158,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 <span
                   className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${isActive
-                      ? "bg-white/20 text-white"
-                      : "bg-slate-100 text-slate-400 border border-slate-200"
+                    ? "bg-white/20 text-white"
+                    : "bg-slate-100 text-slate-400 border border-slate-200"
                     }`}
                 >
                   {item.hotkey}
@@ -180,6 +186,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
             Dual Layar
           </span>
         </button>
+
+        {/* Shift Kasir & Rekonsiliasi Kas Laci (PRD F5) */}
+        {onOpenShiftModal && (
+          <button
+            onClick={onOpenShiftModal}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold border transition cursor-pointer shadow-2xs ${activeShiftName
+              ? "bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-900"
+              : "bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-900"
+              }`}
+            title="Buka / Tutup Shift Kasir & Hitung Fisik Laci"
+          >
+            <div className="flex items-center gap-2">
+              <Shield className={`w-3.5 h-3.5 ${activeShiftName ? "text-emerald-600" : "text-amber-600"}`} />
+              <span className="truncate max-w-[125px]">
+                {activeShiftName ? `Shift: ${activeShiftName}` : "Shift Tutup (Klik Buka)"}
+              </span>
+            </div>
+            <span
+              className={`w-2 h-2 rounded-full ${activeShiftName ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
+                }`}
+            />
+          </button>
+        )}
 
         {/* Backup & Restore Database Button (PRD T3) */}
         <button
@@ -212,15 +241,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? "Semua transaksi tersinkron ke cloud"
                     : `Server invoice publik offline (${cloudMessage || "klik untuk konfigurasi"})`
             }
-            className={`flex-1 flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border transition cursor-pointer ${
-              pendingSyncCount > 0
-                ? cloudConnected
-                  ? "bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100"
-                  : "bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100"
-                : cloudConnected
-                  ? "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                  : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-            }`}
+            className={`flex-1 flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border transition cursor-pointer ${pendingSyncCount > 0
+              ? cloudConnected
+                ? "bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100"
+                : "bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100"
+              : cloudConnected
+                ? "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+              }`}
           >
             <div className="flex items-center gap-2">
               {isSyncing ? (
@@ -261,6 +289,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           </button>
 
+          {onOpenVoidReturnModal && (
+            <button
+              onClick={onOpenVoidReturnModal}
+              title="Retur Barang & Void Transaksi (PRD F6)"
+              className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-rose-50 text-slate-500 hover:text-rose-700 transition cursor-pointer shrink-0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           <button
             onClick={() => setIsPrinterModalOpen(true)}
             title="Pengaturan Printer Thermal Struk (F9)"
@@ -283,8 +321,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={onOpenPhoneScannerModal}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold border transition ${isPhoneConnected
-                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                : "bg-white hover:bg-slate-50 border-slate-200 text-slate-700"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : "bg-white hover:bg-slate-50 border-slate-200 text-slate-700"
               }`}
           >
             <div className="flex items-center gap-2">

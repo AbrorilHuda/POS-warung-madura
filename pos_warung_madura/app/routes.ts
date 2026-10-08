@@ -7,4 +7,7 @@ export default [
   route("api/backup", "routes/api.backup.ts"),
   route("api/customers", "routes/api.customers.ts"),
   route("api/printer", "routes/api.printer.ts"),
+  route("api/report", "routes/api.report.ts"),
+  route("api/shift", "routes/api.shift.ts"),
+  route("api/returns", "routes/api.returns.ts"),
 ] satisfies RouteConfig;

@@ -39,6 +39,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         storeName: validation.tenant.store_name,
         storeCode: validation.tenant.store_code,
         storeSlug: validation.tenant.store_slug,
+        ownerName: validation.tenant.owner_name || null,
         storeAddress: validation.tenant.store_address,
         ownerEmail: validation.tenant.owner_email,
         contactWa: validation.tenant.contact_wa,

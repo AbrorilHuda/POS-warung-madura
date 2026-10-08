@@ -202,7 +202,7 @@ export async function incrementInvoiceCount(tenantId: string): Promise<void> {
 export async function registerTenant(
   input: RegisterTenantInput
 ): Promise<RegisterTenantResult> {
-  const { store_name, store_address, owner_email, contact_wa } = input;
+  const { store_name, owner_name, store_address, owner_email, contact_wa } = input;
 
   if (!store_name?.trim()) {
     return { success: false, error: "Nama toko wajib diisi" };
@@ -229,6 +229,7 @@ export async function registerTenant(
         store_code,
         store_slug,
         store_name: store_name.trim(),
+        owner_name: owner_name?.trim() || null,
         store_address: store_address?.trim() || null,
         plan: "free",
         sync_secret,
@@ -242,6 +243,7 @@ export async function registerTenant(
       store_code,
       store_slug,
       store_name: store_name.trim(),
+      owner_name: owner_name?.trim() || null,
       store_address: store_address?.trim() || null,
       owner_email: owner_email.trim().toLowerCase(),
       contact_wa: contact_wa?.replace(/\D/g, "") || null,
@@ -251,7 +253,7 @@ export async function registerTenant(
       invoice_limit: Number(process.env.FREE_INVOICE_LIMIT) || 50,
       status: "active",
     })
-    .select("store_code, store_slug, store_name, store_address, plan")
+    .select("store_code, store_slug, store_name, owner_name, store_address, plan")
     .single();
 
   if (error || !data) {
@@ -268,6 +270,7 @@ export async function registerTenant(
       store_code: data.store_code,
       store_slug: data.store_slug,
       store_name: data.store_name,
+      owner_name: data.owner_name,
       store_address: data.store_address,
       plan: data.plan,
       sync_secret,

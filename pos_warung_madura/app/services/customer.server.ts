@@ -401,12 +401,18 @@ export async function payCustomerDebtFIFO(params: {
         WHERE id = ?
       `, [newPaidAmount, newStatus, rec.id]);
 
+      // Ambil active shift id untuk pelunasan kasbon selama shift ini (PRD F5.4)
+      const [shiftRows] = await connection.execute<RowDataPacket[]>(
+        "SELECT id FROM cashier_shifts WHERE status = 'open' ORDER BY start_time DESC LIMIT 1"
+      );
+      const activeShiftId = shiftRows.length > 0 ? String(shiftRows[0].id) : null;
+
       // Catat ke buku besar pembayaran (receivable_payments)
       const paymentId = crypto.randomUUID();
       await connection.execute(`
         INSERT INTO receivable_payments (
-          id, customer_id, receivable_id, amount, payment_method, notes, created_by, paid_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+          id, customer_id, receivable_id, amount, payment_method, notes, created_by, shift_id, paid_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `, [
         paymentId,
         params.customerId,
@@ -415,6 +421,7 @@ export async function payCustomerDebtFIFO(params: {
         params.paymentMethod,
         params.notes || `Pelunasan FIFO nota ${rec.invoice_code || "-"}`,
         params.createdBy || "Kasir",
+        activeShiftId,
       ]);
 
       remainingToPay -= alloc;
@@ -442,19 +449,9 @@ export async function payCustomerDebtFIFO(params: {
 
 /**
  * Validasi PIN Pemilik untuk override batas kasbon atau aksi sensitif (PRD F1.7)
+ * Terintegrasi penuh dengan pengecekan hash & Emergency Recovery Code dari shift.server
  */
-export async function verifyOwnerPin(inputPin: string): Promise<boolean> {
-  await ensureDatabaseSchema();
-  try {
-    const rows = await query<RowDataPacket[]>(`
-      SELECT setting_value FROM store_settings WHERE setting_key = 'owner_pin' LIMIT 1
-    `);
-    const savedPin = rows[0]?.setting_value || "1234";
-    return inputPin.trim() === savedPin.trim();
-  } catch {
-    return inputPin.trim() === "1234";
-  }
-}
+export { verifyOwnerPin } from "./shift.server";
 
 /**
  * Membuat tautan WhatsApp wa.me dengan teks penagihan otomatis yang rapi (PRD F1.9)

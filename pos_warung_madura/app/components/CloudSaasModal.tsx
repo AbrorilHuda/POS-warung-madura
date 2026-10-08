@@ -299,12 +299,19 @@ export const CloudSaasModal: React.FC<CloudSaasModalProps> = ({
                           {cloudTenant?.storeCode || storeConfig?.storeCode}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 min-w-0">
-                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="truncate">
-                          {cloudTenant?.storeAddress || storeConfig?.storeAddress || "Alamat warung terdaftar"}
+                      <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2 flex-wrap min-w-0">
+                        <span className="flex items-center gap-1 truncate">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>
+                            {cloudTenant?.storeAddress || storeConfig?.storeAddress || "Alamat warung terdaftar"}
+                          </span>
                         </span>
-                      </p>
+                        {(cloudTenant?.ownerName || storeConfig?.ownerName) && (
+                          <span className="text-slate-600 font-medium bg-slate-100 px-2 py-0.5 rounded text-[10px]">
+                            Pemilik: <strong className="text-slate-800">{cloudTenant?.ownerName || storeConfig?.ownerName}</strong>
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 

@@ -142,12 +142,20 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
   try {
     await connection.beginTransaction();
 
-    // 1. Simpan Header Sales (termasuk customer_id jika kasbon / langganan)
+    // Ambil shift kasir yang aktif saat ini jika ada (PRD F5.3)
+    const [shiftRows] = await connection.execute<RowDataPacket[]>(
+      "SELECT id, cashier_name FROM cashier_shifts WHERE status = 'open' ORDER BY start_time DESC LIMIT 1"
+    );
+    const activeShiftId = shiftRows.length > 0 ? String(shiftRows[0].id) : null;
+    const activeCashierName = shiftRows.length > 0 ? String(shiftRows[0].cashier_name) : null;
+    const finalCashierName = sale.cashierName || activeCashierName || process.env.CASHIER_DEFAULT_NAME || "Kasir";
+
+    // 1. Simpan Header Sales (termasuk customer_id dan shift_id)
     await connection.execute(`
       INSERT INTO sales (
         id, invoice_code, total_amount, paid_amount, change_amount, 
-        payment_method, customer_id, customer_name, cashier_name, sync_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        payment_method, customer_id, customer_name, cashier_name, sync_status, shift_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       sale.id,
       sale.invoiceCode,
@@ -157,8 +165,9 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
       sale.paymentMethod,
       sale.customerId || null,
       sale.customerName || null,
-      sale.cashierName,
+      finalCashierName,
       sale.syncStatus,
+      activeShiftId,
     ]);
 
     // 1b. Jika pembayaran adalah Kasbon atau pembayaran sebagian dengan sisa utang (PRD F1.2 & F1.3)
@@ -180,6 +189,23 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
         debtAmount,
         `Kasbon nota ${sale.invoiceCode}`,
       ]);
+    }
+
+    // 1c. Simpan Rincian Pembayaran Split Payment jika ada (PRD F4.2)
+    if (sale.splitPayments && sale.splitPayments.length > 0) {
+      for (const sp of sale.splitPayments) {
+        const spId = `sp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        await connection.execute(`
+          INSERT INTO sale_payments (id, sale_id, payment_method, amount, reference_no)
+          VALUES (?, ?, ?, ?, ?)
+        `, [
+          spId,
+          sale.id,
+          sp.method,
+          sp.amount,
+          sp.referenceNo || null,
+        ]);
+      }
     }
 
     // 2. Simpan Sale Items & Ledger Mutasi Keluar
@@ -610,6 +636,7 @@ export async function rotateDeviceKey(): Promise<InstallationIdentity> {
 export interface StoreConfig {
   storeCode: string;
   storeName: string;
+  ownerName: string;
   storeSlug: string;
   storeTagline: string;
   storeAddress: string;
@@ -624,6 +651,7 @@ export interface CloudTenantInfo {
   valid: boolean;
   id?: string;
   storeName?: string;
+  ownerName?: string | null;
   storeCode?: string;
   storeSlug?: string;
   storeAddress?: string | null;
@@ -658,10 +686,11 @@ export function getStoreConfig(): StoreConfig {
   return {
     storeCode: process.env.STORE_CODE || "WM01",
     storeName: process.env.STORE_NAME || "Warung Madura Berkah",
+    ownerName: process.env.OWNER_NAME || "Cak Mat (Pemilik)",
     storeSlug: process.env.STORE_SLUG || "warung-madura-berkah",
     storeTagline: process.env.STORE_TAGLINE || "Buka 24 Jam Non-Stop",
     storeAddress: process.env.STORE_ADDRESS || "Jl. Raya Warung Madura No. 24, Buka 24 Jam Non-Stop",
-    storeCity: process.env.STORE_CITY || "Sumenep",
+    storeCity: process.env.STORE_CITY || "",
     cashierName: process.env.CASHIER_DEFAULT_NAME || "Cak Mat",
     publicInvoiceBaseUrl: process.env.PUBLIC_INVOICE_BASE_URL || "",
     syncSecretKey: getSyncSecretKey(),
@@ -740,6 +769,7 @@ export interface UpdateCloudConfigInput {
   storeCode?: string;
   storeSlug?: string;
   storeName?: string;
+  ownerName?: string;
   storeAddress?: string;
 }
 
@@ -842,6 +872,7 @@ export async function saveCloudConfig(input: UpdateCloudConfigInput): Promise<{
 
   // 2. Ambil identitas otomatis dari respon SaaS (kecuali dioverride secara eksplisit)
   const storeName = input.storeName?.trim() || tenant.storeName || process.env.STORE_NAME || "Warung Madura";
+  const ownerName = input.ownerName?.trim() || tenant.ownerName || process.env.OWNER_NAME || "";
   const storeCode = input.storeCode?.trim().toUpperCase() || tenant.storeCode || process.env.STORE_CODE || "WM01";
   const storeSlug = input.storeSlug?.trim() || tenant.storeSlug || process.env.STORE_SLUG || "warung-madura";
   const storeAddress = input.storeAddress?.trim() || tenant.storeAddress || process.env.STORE_ADDRESS || "";
@@ -851,6 +882,7 @@ export async function saveCloudConfig(input: UpdateCloudConfigInput): Promise<{
   process.env.SYNC_SECRET_KEY = secretKey;
   process.env.PUBLIC_INVOICE_SYNC_URL = syncUrl;
   process.env.STORE_NAME = storeName;
+  if (ownerName) process.env.OWNER_NAME = ownerName;
   process.env.STORE_CODE = storeCode;
   process.env.STORE_SLUG = storeSlug;
   if (storeAddress) process.env.STORE_ADDRESS = storeAddress;
@@ -875,6 +907,7 @@ export async function saveCloudConfig(input: UpdateCloudConfigInput): Promise<{
   updateEnvKey("SYNC_SECRET_KEY", secretKey);
   updateEnvKey("PUBLIC_INVOICE_SYNC_URL", syncUrl);
   updateEnvKey("STORE_NAME", storeName);
+  if (ownerName) updateEnvKey("OWNER_NAME", ownerName);
   updateEnvKey("STORE_CODE", storeCode);
   updateEnvKey("STORE_SLUG", storeSlug);
   if (storeAddress) updateEnvKey("STORE_ADDRESS", storeAddress);
@@ -886,12 +919,26 @@ export async function saveCloudConfig(input: UpdateCloudConfigInput): Promise<{
     console.error("[saveCloudConfig] Gagal menulis ke .env:", err);
   }
 
+  // Update profil owner di database lokal jika ada
+  try {
+    if (ownerName) {
+      await query("UPDATE users SET name = ? WHERE role = 'owner'", [ownerName]);
+      await query(
+        "INSERT INTO store_settings (setting_key, setting_value) VALUES ('owner_name', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
+        [ownerName]
+      );
+    }
+  } catch (dbErr) {
+    console.warn("[saveCloudConfig] Gagal update owner di database:", dbErr);
+  }
+
   return {
     ok: true,
     message: `Toko "${storeName}" (${storeCode}) berhasil dihubungkan! Paket: ${tenant.plan?.toUpperCase()}.`,
     tenant: {
       ...tenant,
       storeName,
+      ownerName,
       storeCode,
       storeSlug,
       storeAddress,

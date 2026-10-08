@@ -54,7 +54,15 @@ export interface Sale {
   totalAmount: number;
   paidAmount: number;
   changeAmount: number;
-  paymentMethod: 'Tunai' | 'QRIS' | 'Hutang' | 'Kasbon';
+  paymentMethod: 'Tunai' | 'QRIS' | 'Hutang' | 'Kasbon' | 'Campuran';
+  splitPayments?: Array<{
+    method: 'Tunai' | 'QRIS' | 'Transfer' | 'Kasbon';
+    amount: number;
+    referenceNo?: string;
+  }>;
+  isVoid?: boolean;
+  voidReason?: string;
+  discountAmount?: number;
   customerId?: string;
   customerName?: string;
   customerDebtRemaining?: number;
@@ -153,5 +161,72 @@ export interface CustomerLedgerEntry {
   balance: number; // Saldo berjalan
   invoiceCode?: string | null;
   paymentMethod?: string | null;
+}
+
+// ----------------------------------------------------------------------------
+// TIPE DATA SHIFT & KEAMANAN MULTI-USER (PRD F5)
+// ----------------------------------------------------------------------------
+export interface ShiftSecuritySettings {
+  isSetupCompleted: boolean;
+  requireCashierPin: boolean;
+  hasOwnerPin: boolean;
+  ownerName: string;
+  ownerHasRecoveryCode: boolean;
+}
+
+export interface UserSession {
+  id: string;
+  name: string;
+  role: "owner" | "cashier" | "stock_admin";
+}
+
+export interface UserDetail {
+  id: string;
+  name: string;
+  role: "owner" | "cashier" | "stock_admin";
+  isActive: boolean;
+  hasPin: boolean;
+  createdAt: string;
+}
+
+export interface ShiftData {
+  id: string;
+  shiftCode: string;
+  cashierId: string;
+  cashierName: string;
+  startTime: string;
+  endTime: string | null;
+  startingCash: number;
+  expectedCash: number;
+  actualCash: number | null;
+  cashDifference: number | null;
+  totalCashSales: number;
+  totalQrisSales: number;
+  totalDebtSales: number;
+  totalDebtCollectedCash: number;
+  totalCashIn: number;
+  totalCashOut: number;
+  status: "open" | "closed";
+  notes: string | null;
+}
+
+export interface CashMovement {
+  id: string;
+  shiftId: string;
+  type: "cash_in" | "cash_out";
+  amount: number;
+  reason: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface AuditLogItem {
+  id: string;
+  userName: string;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  details: string | null;
+  createdAt: string;
 }
 

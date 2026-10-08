@@ -49,42 +49,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   } | null>(null);
   const autoPrintCheckedRef = useRef<string | null>(null);
 
-  if (!isOpen || !sale) return null;
-
-  // URL invoice publik multi-tenant:
-  // Format: {baseUrl}/{storeSlug}/invoice/{invoiceCode}
-  const host =
-    typeof window !== "undefined" && window.location.hostname
-      ? window.location.hostname
-      : "localhost";
-
-  let fallbackBaseUrl = `http://${host}:5175`;
-  if (
-    storeConfig?.publicInvoiceSyncUrl &&
-    !storeConfig.publicInvoiceSyncUrl.includes("127.0.0.1") &&
-    !storeConfig.publicInvoiceSyncUrl.includes("localhost")
-  ) {
-    try {
-      fallbackBaseUrl = new URL(storeConfig.publicInvoiceSyncUrl).origin;
-    } catch (e) {}
-  }
-
-  const baseUrl = (storeConfig?.publicInvoiceBaseUrl || fallbackBaseUrl).replace(/\/$/, "");
-  const storeSlug = storeConfig?.storeSlug || "warung-madura-berkah";
-  const invoiceUrl = `${baseUrl}/${storeSlug}/invoice/${sale.invoiceCode}`;
-
-  const handleCopyLink = () => {
-    if (typeof navigator !== "undefined") {
-      navigator.clipboard.writeText(invoiceUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const handlePrint = () => {
-    window.print();
-  };
-
   const handlePrintThermal = async (isCopy = false) => {
     if (!sale) return;
     try {
@@ -124,6 +88,59 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }
   };
 
+  // Auto-Print saat transaksi selesai (PRD F9.2) - WAJIB dipanggil sebelum early return
+  useEffect(() => {
+    if (isOpen && sale && autoPrintCheckedRef.current !== sale.id) {
+      autoPrintCheckedRef.current = sale.id;
+      // Cek apakah autoPrint aktif di server
+      fetch("/api/printer")
+        .then((r) => r.json())
+        .then((json) => {
+          if (json.ok && json.settings?.autoPrint) {
+            handlePrintThermal(false);
+          }
+        })
+        .catch(() => { });
+    }
+  }, [isOpen, sale]);
+
+  // Early return diposisikan setelah semua hooks selesai dideklarasikan
+  if (!isOpen || !sale) return null;
+
+  // URL invoice publik multi-tenant:
+  // Format: {baseUrl}/{storeSlug}/invoice/{invoiceCode}
+  const host =
+    typeof window !== "undefined" && window.location.hostname
+      ? window.location.hostname
+      : "localhost";
+
+  let fallbackBaseUrl = `http://${host}:5175`;
+  if (
+    storeConfig?.publicInvoiceSyncUrl &&
+    !storeConfig.publicInvoiceSyncUrl.includes("127.0.0.1") &&
+    !storeConfig.publicInvoiceSyncUrl.includes("localhost")
+  ) {
+    try {
+      fallbackBaseUrl = new URL(storeConfig.publicInvoiceSyncUrl).origin;
+    } catch (e) { }
+  }
+
+  const baseUrl = (storeConfig?.publicInvoiceBaseUrl || fallbackBaseUrl).replace(/\/$/, "");
+  const storeSlug = storeConfig?.storeSlug || "warung-madura-berkah";
+  const invoiceUrl = `${baseUrl}/${storeSlug}/invoice/${sale.invoiceCode}`;
+
+  const handleCopyLink = () => {
+    if (typeof navigator !== "undefined") {
+      navigator.clipboard.writeText(invoiceUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
   const handleOpenCashDrawer = async () => {
     try {
       const fd = new FormData();
@@ -140,22 +157,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       setThermalToast({ type: "error", message: "Gagal membuka laci uang." });
     }
   };
-
-  // Auto-Print saat transaksi selesai (PRD F9.2)
-  useEffect(() => {
-    if (isOpen && sale && autoPrintCheckedRef.current !== sale.id) {
-      autoPrintCheckedRef.current = sale.id;
-      // Cek apakah autoPrint aktif di server
-      fetch("/api/printer")
-        .then((r) => r.json())
-        .then((json) => {
-          if (json.ok && json.settings?.autoPrint) {
-            handlePrintThermal(false);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [isOpen, sale]);
 
   const handleShareWhatsApp = () => {
     const storeDisplayName = storeConfig?.storeName?.toUpperCase() || "WARUNG MADURA";
@@ -237,23 +238,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         {/* Realtime Thermal Print Toast */}
         {thermalToast && (
           <div
-            className={`px-5 py-2 text-xs font-semibold flex items-center justify-between border-b transition-all ${
-              thermalToast.type === "success"
+            className={`px-5 py-2 text-xs font-semibold flex items-center justify-between border-b transition-all ${thermalToast.type === "success"
                 ? "bg-emerald-900 text-emerald-100 border-emerald-800"
                 : thermalToast.type === "error"
-                ? "bg-rose-900 text-rose-100 border-rose-800"
-                : "bg-slate-900 text-slate-100 border-slate-800"
-            }`}
+                  ? "bg-rose-900 text-rose-100 border-rose-800"
+                  : "bg-slate-900 text-slate-100 border-slate-800"
+              }`}
           >
             <span className="flex items-center gap-2">
               <span
-                className={`w-2 h-2 rounded-full ${
-                  thermalToast.type === "success"
+                className={`w-2 h-2 rounded-full ${thermalToast.type === "success"
                     ? "bg-emerald-400"
                     : thermalToast.type === "error"
-                    ? "bg-rose-400 animate-pulse"
-                    : "bg-amber-400 animate-ping"
-                }`}
+                      ? "bg-rose-400 animate-pulse"
+                      : "bg-amber-400 animate-ping"
+                  }`}
               ></span>
               {thermalToast.message}
             </span>
@@ -282,7 +281,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   {storeConfig?.storeName || "WARUNG MADURA BERKAH"}
                 </h4>
                 <p className="text-[10px] text-slate-500 mt-0.5">
-                  {storeConfig?.storeTagline || "Buka 24 Jam Non-Stop"} &bull; {storeConfig?.storeCity || "Sumenep"}
+                  {storeConfig?.storeTagline || "Buka 24 Jam Non-Stop"} &bull; {storeConfig?.storeCity || ""}
                 </p>
                 <p className="text-[9px] text-slate-400">
                   {storeConfig?.storeAddress || "Jl. Raya Warung Madura No. 24"}

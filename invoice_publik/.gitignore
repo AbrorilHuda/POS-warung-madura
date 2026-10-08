@@ -5,4 +5,3 @@
 # React Router
 /.react-router/
 /build/
-supabase-schema-v2-multitenant.sql

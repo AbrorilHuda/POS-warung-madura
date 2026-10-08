@@ -2,18 +2,15 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   Store,
-  Search,
   Receipt,
   QrCode,
   ShieldCheck,
   ArrowRight,
-  ExternalLink,
-  Sparkles,
 } from "lucide-react";
 
 export function meta() {
   return [
-    { title: "Cek Struk Belanja — POS Warung" },
+    { title: "cek struk belanja - cloud invoice" },
     {
       name: "description",
       content: "Portal cek struk dan invoice digital dari berbagai toko. Daftarkan toko kamu di /daftar.",
@@ -59,7 +56,7 @@ export default function Home() {
             <Store className="w-7 h-7 text-emerald-400" />
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-            Warung Madura Berkah
+            Invoice Digital POS
           </h1>
           <p className="text-xs text-slate-500">
             Portal Struk & Invoice Digital Resmi Pelanggan
@@ -84,11 +81,10 @@ export default function Home() {
                 }}
                 maxLength={50}
                 placeholder="Contoh: WM01-000141"
-                className={`w-full pl-3.5 pr-10 py-3 bg-slate-50 border rounded-xl text-slate-900 placeholder-slate-400 font-mono text-sm uppercase focus:bg-white focus:outline-none focus:ring-2 transition ${
-                  errorMessage
-                    ? "border-rose-400 focus:ring-rose-500"
-                    : "border-slate-200 focus:ring-slate-900"
-                }`}
+                className={`w-full pl-3.5 pr-10 py-3 bg-slate-50 border rounded-xl text-slate-900 placeholder-slate-400 font-mono text-sm uppercase focus:bg-white focus:outline-none focus:ring-2 transition ${errorMessage
+                  ? "border-rose-400 focus:ring-rose-500"
+                  : "border-slate-200 focus:ring-slate-900"
+                  }`}
               />
               <button
                 type="submit"

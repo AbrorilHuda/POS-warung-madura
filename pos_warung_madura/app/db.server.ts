@@ -124,6 +124,22 @@ export async function ensureDatabaseSchema(): Promise<void> {
       GROUP BY c.id, c.name, c.phone, c.address, c.credit_limit, c.is_active;
     `);
 
+    // 4b. View stok terkini produk dari ledger (PRD F2)
+    await pool.query(`
+      CREATE OR REPLACE VIEW v_product_current_stocks AS
+      SELECT 
+        p.id AS product_id,
+        p.name AS product_name,
+        p.category,
+        p.base_unit,
+        p.min_stock_alert,
+        COALESCE(SUM(sm.quantity_in_base_unit), 0) AS current_stock_base_unit
+      FROM products p
+      LEFT JOIN stock_movements sm ON p.id = sm.product_id
+      WHERE p.is_active = TRUE
+      GROUP BY p.id, p.name, p.category, p.base_unit, p.min_stock_alert;
+    `);
+
     // 5. Tambah kolom customer_id dan customer_name di sales jika belum ada
     const [cols] = await pool.query<RowDataPacket[]>(
       `SHOW COLUMNS FROM sales LIKE 'customer_id'`
@@ -137,15 +153,163 @@ export async function ensureDatabaseSchema(): Promise<void> {
       `);
     }
 
-    // 6. Pastikan ENUM payment_method memuat 'Kasbon'
+    // 6. Pastikan ENUM payment_method memuat 'Kasbon' dan 'Campuran' (PRD F4.2)
     try {
       await pool.query(`
         ALTER TABLE sales 
-        MODIFY COLUMN payment_method ENUM('Tunai', 'QRIS', 'Hutang', 'Kasbon') DEFAULT 'Tunai';
+        MODIFY COLUMN payment_method ENUM('Tunai', 'QRIS', 'Hutang', 'Kasbon', 'Campuran') DEFAULT 'Tunai';
       `);
     } catch {}
 
-    // 7. Pengaturan default
+    // 7. Tabel users (PRD F5.1, F5.2 Multi-User & PIN login)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        role ENUM('owner', 'cashier', 'stock_admin') NOT NULL DEFAULT 'cashier',
+        pin_hash VARCHAR(255) NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_users_role (role)
+      ) ENGINE=InnoDB;
+    `);
+
+    try {
+      await pool.query("ALTER TABLE users MODIFY COLUMN pin_hash VARCHAR(255) NULL;");
+    } catch {}
+
+    // Inisialisasi User default jika tabel users masih kosong (Cak Mat: Owner PIN 1234, Siti: Kasir PIN 0000)
+    const [userCountRows] = await pool.query<RowDataPacket[]>("SELECT COUNT(*) AS cnt FROM users");
+    if (userCountRows[0]?.cnt === 0) {
+      // SHA-256('1234') = 03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4
+      // SHA-256('0000') = 9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0
+      await pool.query(`
+        INSERT INTO users (id, name, role, pin_hash, is_active) VALUES
+        ('usr-owner-01', 'Cak Mat (Pemilik)', 'owner', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', TRUE),
+        ('usr-cashier-01', 'Siti (Kasir)', 'cashier', '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', TRUE);
+      `);
+    }
+
+    // 8. Tabel cashier_shifts (PRD F5.3, F5.4 Buka/Tutup Shift)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cashier_shifts (
+        id VARCHAR(36) PRIMARY KEY,
+        shift_code VARCHAR(50) UNIQUE NOT NULL,
+        cashier_id VARCHAR(36) NOT NULL,
+        cashier_name VARCHAR(100) NOT NULL,
+        start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        end_time TIMESTAMP NULL,
+        starting_cash DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        expected_cash DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        actual_cash DECIMAL(14, 2) NULL,
+        cash_difference DECIMAL(14, 2) NULL,
+        total_cash_sales DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        total_qris_sales DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        total_debt_sales DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        total_debt_collected_cash DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        total_cash_in DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        total_cash_out DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        status ENUM('open', 'closed') DEFAULT 'open',
+        notes TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_shifts_status (status),
+        INDEX idx_shifts_cashier (cashier_id),
+        INDEX idx_shifts_created (created_at)
+      ) ENGINE=InnoDB;
+    `);
+
+    // 9. Tabel shift_cash_movements (PRD F5.5 Kas Masuk / Kas Keluar selama shift)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS shift_cash_movements (
+        id VARCHAR(36) PRIMARY KEY,
+        shift_id VARCHAR(36) NOT NULL,
+        type ENUM('cash_in', 'cash_out') NOT NULL,
+        amount DECIMAL(14, 2) NOT NULL,
+        reason VARCHAR(255) NOT NULL,
+        created_by VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_scm_shift (shift_id)
+      ) ENGINE=InnoDB;
+    `);
+
+    // 10. Tabel audit_logs (PRD F5.7 Jejak Rekam Aktivitas Sensitif)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id VARCHAR(36) PRIMARY KEY,
+        user_name VARCHAR(100) NOT NULL,
+        action VARCHAR(100) NOT NULL,
+        target_type VARCHAR(50) NULL,
+        target_id VARCHAR(50) NULL,
+        details TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_audit_action (action),
+        INDEX idx_audit_created (created_at)
+      ) ENGINE=InnoDB;
+    `);
+
+    // 11. Tabel sale_payments (PRD F4 Split Payment)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sale_payments (
+        id VARCHAR(36) PRIMARY KEY,
+        sale_id VARCHAR(36) NOT NULL,
+        payment_method ENUM('Tunai', 'QRIS', 'Transfer', 'Kasbon') NOT NULL,
+        amount DECIMAL(14, 2) NOT NULL,
+        reference_no VARCHAR(100) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_sale_pay_sale (sale_id)
+      ) ENGINE=InnoDB;
+    `);
+
+    // 12. Tabel sale_returns & sale_return_items (PRD F6.2 Retur Barang)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sale_returns (
+        id VARCHAR(36) PRIMARY KEY,
+        return_code VARCHAR(50) UNIQUE NOT NULL,
+        sale_id VARCHAR(36) NOT NULL,
+        invoice_code VARCHAR(50) NOT NULL,
+        shift_id VARCHAR(36) NULL,
+        total_refund_amount DECIMAL(14, 2) NOT NULL,
+        refund_method ENUM('Tunai', 'Kasbon_Dipotong', 'Kredit_Toko') DEFAULT 'Tunai',
+        reason TEXT NOT NULL,
+        approved_by VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_returns_sale (sale_id),
+        INDEX idx_returns_code (return_code)
+      ) ENGINE=InnoDB;
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sale_return_items (
+        id VARCHAR(36) PRIMARY KEY,
+        sale_return_id VARCHAR(36) NOT NULL,
+        sale_item_id VARCHAR(36) NOT NULL,
+        product_id VARCHAR(36) NOT NULL,
+        quantity DECIMAL(12, 4) NOT NULL,
+        refund_price DECIMAL(14, 2) NOT NULL,
+        is_restockable BOOLEAN DEFAULT TRUE,
+        condition_notes VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ret_item_return (sale_return_id)
+      ) ENGINE=InnoDB;
+    `);
+
+    // 13. Tambahkan kolom void, diskon, shift_id ke sales jika belum ada
+    const [colsVoid] = await pool.query<RowDataPacket[]>("SHOW COLUMNS FROM sales LIKE 'is_void'");
+    if (colsVoid.length === 0) {
+      await pool.query(`
+        ALTER TABLE sales
+        ADD COLUMN is_void BOOLEAN DEFAULT FALSE AFTER sync_status,
+        ADD COLUMN void_reason TEXT NULL AFTER is_void,
+        ADD COLUMN voided_at TIMESTAMP NULL AFTER void_reason,
+        ADD COLUMN voided_by VARCHAR(100) NULL AFTER voided_at,
+        ADD COLUMN shift_id VARCHAR(36) NULL AFTER voided_by,
+        ADD COLUMN discount_amount DECIMAL(14, 2) DEFAULT 0 AFTER total_amount,
+        ADD COLUMN discount_type VARCHAR(50) NULL AFTER discount_amount;
+      `);
+    }
+
+    // 14. Pengaturan default
     await pool.query(`
       INSERT INTO store_settings (setting_key, setting_value) VALUES
         ('owner_pin', '1234'),

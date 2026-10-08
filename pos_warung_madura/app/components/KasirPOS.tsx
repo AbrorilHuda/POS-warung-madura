@@ -8,21 +8,14 @@ import {
   CheckCircle2,
   Banknote,
   QrCode,
-  CreditCard,
   RotateCcw,
-  Zap,
   ShoppingBag,
-  Receipt,
   X,
   AlertTriangle,
-  ArrowRight,
-  Clock,
-  Sparkles,
   FileText,
   Users,
   Lock,
-  KeyRound,
-  ShieldCheck,
+  Layers,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import {
@@ -41,6 +34,8 @@ interface KasirPOSProps {
   onClearQuickScanTrigger: () => void;
   nextInvoiceSeq?: number;
   storeConfig?: StoreConfig;
+  activeShift?: any;
+  onRequireOpenShift?: () => void;
 }
 
 export const KasirPOS: React.FC<KasirPOSProps> = ({
@@ -52,18 +47,29 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
   onClearQuickScanTrigger,
   nextInvoiceSeq,
   storeConfig,
+  activeShift,
+  onRequireOpenShift,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Semua");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paidAmount, setPaidAmount] = useState<number>(0);
-  const [paymentMethod, setPaymentMethod] = useState<"Tunai" | "QRIS" | "Hutang">("Tunai");
+  const [paymentMethod, setPaymentMethod] = useState<"Tunai" | "QRIS" | "Hutang" | "Campuran">("Tunai");
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [showPinModal, setShowPinModal] = useState<boolean>(false);
   const [pinInput, setPinInput] = useState<string>("");
   const [pinError, setPinError] = useState<string>("");
   const [isPinApproved, setIsPinApproved] = useState<boolean>(false);
+
+  // Split Payment & QRIS States (PRD F4)
+  const [showQrisModal, setShowQrisModal] = useState<boolean>(false);
+  const [qrisRefNo, setQrisRefNo] = useState<string>("");
+  const [splitCashAmount, setSplitCashAmount] = useState<number>(0);
+  const [splitNonCashAmount, setSplitNonCashAmount] = useState<number>(0);
+  const [splitNonCashMethod, setSplitNonCashMethod] = useState<"QRIS" | "Transfer">("QRIS");
+  const [splitRefNo, setSplitRefNo] = useState<string>("");
+
   const [invoiceSeq, setInvoiceSeq] = useState<number>(nextInvoiceSeq || 141);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const paidInputRef = useRef<HTMLInputElement>(null);
@@ -75,7 +81,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
       .then((d) => {
         if (d.ok && d.customers) setCustomers(d.customers);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const storePrefix = storeConfig?.storeCode || "WM01";
@@ -302,6 +308,11 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
 
   const handleCheckout = () => {
     if (cart.length === 0) return;
+    if (!activeShift) {
+      if (onRequireOpenShift) onRequireOpenShift();
+      alert("Laci kasir belum dibuka! Silakan masukkan modal awal shift kasir terlebih dahulu.");
+      return;
+    }
     if (paidAmount < grandTotal && paymentMethod === "Tunai") {
       alert("Nominal pembayaran belum mencukupi!");
       paidInputRef.current?.focus();
@@ -329,15 +340,51 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
       }
     }
 
+    if (paymentMethod === "Campuran") {
+      const totalSplitPaid = splitCashAmount + splitNonCashAmount;
+      if (totalSplitPaid < grandTotal) {
+        alert(`Total pembayaran campuran (Rp ${totalSplitPaid.toLocaleString("id-ID")}) belum mencukupi tagihan (Rp ${grandTotal.toLocaleString("id-ID")})!`);
+        return;
+      }
+    }
+
     try {
       confetti({
         particleCount: 50,
         spread: 60,
         origin: { y: 0.8 },
       });
-    } catch (e) {}
+    } catch (e) { }
 
-    const actualPaid = paymentMethod === "Tunai" ? paidAmount : isKasbon ? (paidAmount || 0) : grandTotal;
+    let actualPaid = paymentMethod === "Tunai" ? paidAmount : isKasbon ? (paidAmount || 0) : grandTotal;
+    let actualChange = paymentMethod === "Tunai" ? changeAmount : 0;
+    let splitPaymentsList: Sale["splitPayments"] = undefined;
+
+    if (paymentMethod === "Campuran") {
+      const splitChange = Math.max(0, (splitCashAmount + splitNonCashAmount) - grandTotal);
+      actualPaid = splitCashAmount + splitNonCashAmount;
+      actualChange = splitChange;
+      splitPaymentsList = [
+        {
+          method: splitNonCashMethod,
+          amount: splitNonCashAmount,
+          referenceNo: splitRefNo || undefined,
+        },
+        {
+          method: "Tunai",
+          amount: splitCashAmount - splitChange,
+        },
+      ];
+    } else if (paymentMethod === "QRIS") {
+      splitPaymentsList = [
+        {
+          method: "QRIS",
+          amount: grandTotal,
+          referenceNo: qrisRefNo || undefined,
+        },
+      ];
+    }
+
     const debtRemainder = isKasbon ? Math.max(0, grandTotal - actualPaid) : 0;
 
     const newSale: Sale = {
@@ -356,13 +403,14 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
       })),
       totalAmount: grandTotal,
       paidAmount: actualPaid,
-      changeAmount: paymentMethod === "Tunai" ? changeAmount : 0,
+      changeAmount: actualChange,
       paymentMethod: isKasbon ? "Kasbon" : paymentMethod,
+      splitPayments: splitPaymentsList,
       customerId: isKasbon ? selectedCustomerId : undefined,
       customerName: isKasbon ? selectedCustomer?.name : undefined,
       customerDebtRemaining: isKasbon ? (selectedCustomer?.totalDebt || 0) + debtRemainder : undefined,
       syncStatus: "pending",
-      cashierName: storeConfig?.cashierName || "Cak Mat",
+      cashierName: activeShift?.cashierName || storeConfig?.cashierName || "Cak Mat",
     };
 
     onRecordSale(newSale);
@@ -462,19 +510,17 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-                      isSelected
-                        ? "bg-slate-900 text-white shadow-xs"
-                        : "bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900"
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${isSelected
+                      ? "bg-slate-900 text-white shadow-xs"
+                      : "bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900"
+                      }`}
                   >
                     <span>{cat}</span>
                     <span
-                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                        isSelected
-                          ? "bg-white/20 text-white"
-                          : "bg-slate-200 text-slate-600"
-                      }`}
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isSelected
+                        ? "bg-white/20 text-white"
+                        : "bg-slate-200 text-slate-600"
+                        }`}
                     >
                       {count}
                     </span>
@@ -633,6 +679,27 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
             </div>
           </div>
 
+          {/* Peringatan Shift Kasir Belum Dibuka (PRD F5.3) */}
+          {!activeShift && (
+            <button
+              type="button"
+              onClick={onRequireOpenShift}
+              className="mt-2.5 p-2.5 rounded-2xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 font-semibold text-xs flex items-center justify-between transition cursor-pointer text-left"
+              title="Klik untuk membuka shift kasir dan input modal awal"
+            >
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                <div>
+                  <p className="font-bold text-[11px] leading-tight">Laci Kasir Belum Dibuka</p>
+                  <p className="text-[10px] text-amber-700">Klik untuk input modal awal laci kasir</p>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 rounded-lg bg-amber-200/80 font-bold text-[10px] text-amber-900 shrink-0">
+                Buka Shift
+              </span>
+            </button>
+          )}
+
           {/* 2. Daftar Belanjaan di Keranjang (Scrollable) */}
           <div className="flex-1 overflow-y-auto py-3 space-y-2.5 pr-1">
             {cart.length === 0 ? (
@@ -750,12 +817,13 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
               </span>
             </div>
 
-            {/* Pilihan Metode Bayar Ber-Ikon */}
-            <div className="grid grid-cols-3 gap-1.5">
+            {/* Pilihan Metode Bayar Ber-Ikon (PRD F4.1) */}
+            <div className="grid grid-cols-4 gap-1.5">
               {[
                 { id: "Tunai", icon: Banknote, label: "Tunai" },
                 { id: "QRIS", icon: QrCode, label: "QRIS" },
                 { id: "Hutang", icon: FileText, label: "Kasbon" },
+                { id: "Campuran", icon: Layers, label: "Split" },
               ].map(({ id, icon: Icon, label }) => {
                 const isSelected = paymentMethod === id;
                 return (
@@ -764,13 +832,19 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                     type="button"
                     onClick={() => {
                       setPaymentMethod(id as any);
-                      setPaidAmount(id === "Hutang" ? 0 : grandTotal);
+                      if (id === "Hutang") {
+                        setPaidAmount(0);
+                      } else if (id === "Campuran") {
+                        setSplitCashAmount(0);
+                        setSplitNonCashAmount(grandTotal);
+                      } else {
+                        setPaidAmount(grandTotal);
+                      }
                     }}
-                    className={`py-2 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                      isSelected
-                        ? "bg-slate-900 text-white border-slate-900 shadow-xs"
-                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                    }`}
+                    className={`py-2 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1 cursor-pointer ${isSelected
+                      ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                      : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
                   >
                     <Icon className="w-3.5 h-3.5" />
                     <span>{label}</span>
@@ -778,6 +852,112 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                 );
               })}
             </div>
+
+            {/* Input Pembayaran QRIS Statis (PRD F4.3) */}
+            {paymentMethod === "QRIS" && (
+              <div className="space-y-2 p-3 bg-blue-50/70 border border-blue-200 rounded-2xl text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-blue-950 flex items-center gap-1.5">
+                    <QrCode className="w-4 h-4 text-blue-700" />
+                    <span>Pembayaran QRIS Statis Toko</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowQrisModal(true)}
+                    className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] transition cursor-pointer"
+                  >
+                    Tampilkan QRIS
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 pt-1 border-t border-blue-200/60">
+                  <span className="text-[11px] text-blue-900 font-medium whitespace-nowrap">
+                    No. Ref / RRN:
+                  </span>
+                  <input
+                    type="text"
+                    value={qrisRefNo}
+                    onChange={(e) => setQrisRefNo(e.target.value)}
+                    placeholder="Opsional (Contoh: RRN-9921)"
+                    className="flex-1 px-2.5 py-1 rounded-lg bg-white border border-blue-300 font-mono text-[11px] outline-none"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Input Pembayaran Campuran / Split Payment (PRD F4.2) */}
+            {paymentMethod === "Campuran" && (
+              <div className="space-y-2 p-3 bg-indigo-50/70 border border-indigo-200 rounded-2xl text-xs">
+                <div className="flex items-center justify-between pb-1 border-b border-indigo-200/60">
+                  <span className="font-bold text-indigo-950 flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-indigo-700" />
+                    <span>Pembayaran Campuran (Split Payment)</span>
+                  </span>
+                  <span className="text-[10px] text-indigo-700 font-mono">2 Metode Bayar</span>
+                </div>
+
+                {/* Bagian Non-Tunai */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-700">1. Porsi Non-Tunai:</span>
+                    <select
+                      value={splitNonCashMethod}
+                      onChange={(e) => setSplitNonCashMethod(e.target.value as any)}
+                      className="px-2 py-0.5 rounded-lg bg-white border border-indigo-300 font-semibold text-[10px] outline-none"
+                    >
+                      <option value="QRIS">QRIS Toko</option>
+                      <option value="Transfer">Transfer Bank</option>
+                    </select>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1.5 text-slate-400 font-mono font-bold text-[11px]">Rp</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={grandTotal}
+                      value={splitNonCashAmount || ""}
+                      onChange={(e) => setSplitNonCashAmount(Number(e.target.value))}
+                      placeholder="0"
+                      className="w-full pl-8 pr-2 py-1 rounded-lg bg-white border border-indigo-300 font-mono font-bold text-xs outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Bagian Tunai */}
+                <div className="space-y-1 pt-1 border-t border-indigo-200/60">
+                  <span className="text-[11px] font-semibold text-slate-700">2. Porsi Uang Tunai Diterima:</span>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1.5 text-slate-400 font-mono font-bold text-[11px]">Rp</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={splitCashAmount || ""}
+                      onChange={(e) => setSplitCashAmount(Number(e.target.value))}
+                      placeholder="0"
+                      className="w-full pl-8 pr-2 py-1 rounded-lg bg-white border border-indigo-300 font-mono font-bold text-xs outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Hasil Kalkulasi Split */}
+                {(() => {
+                  const totalPaid = splitCashAmount + splitNonCashAmount;
+                  const diff = totalPaid - grandTotal;
+                  return (
+                    <div
+                      className={`p-2 rounded-xl border flex items-center justify-between font-bold text-[11px] ${diff >= 0
+                        ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                        : "bg-rose-50 border-rose-300 text-rose-900"
+                        }`}
+                    >
+                      <span>{diff >= 0 ? "Kembalian Tunai:" : "Kurang Bayar:"}</span>
+                      <span className="font-mono text-sm">
+                        Rp {Math.abs(diff).toLocaleString("id-ID")}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* Input Pembayaran Tunai & Preset Uang Pecahan Rupiah */}
             {paymentMethod === "Tunai" && (
@@ -818,11 +998,10 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                 {/* Indikator Kembalian Jelas */}
                 {cart.length > 0 && (
                   <div
-                    className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between ${
-                      paidAmount >= grandTotal
-                        ? "bg-emerald-50 border-emerald-300 text-emerald-900"
-                        : "bg-rose-50 border-rose-200 text-rose-800"
-                    }`}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between ${paidAmount >= grandTotal
+                      ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                      : "bg-rose-50 border-rose-200 text-rose-800"
+                      }`}
                   >
                     <span>
                       {paidAmount >= grandTotal ? "Kembalian Pelanggan:" : "Kekurangan Bayar:"}
@@ -934,11 +1113,10 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
               type="button"
               disabled={cart.length === 0 || (paymentMethod === "Hutang" && !selectedCustomerId)}
               onClick={handleCheckout}
-              className={`w-full py-3.5 rounded-2xl font-black text-xs sm:text-sm tracking-wide flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm ${
-                cart.length > 0 && !(paymentMethod === "Hutang" && !selectedCustomerId)
-                  ? "bg-emerald-600 hover:bg-emerald-500 text-white active:scale-[0.99] shadow-emerald-700/20"
-                  : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
-              }`}
+              className={`w-full py-3.5 rounded-2xl font-black text-xs sm:text-sm tracking-wide flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm ${cart.length > 0 && !(paymentMethod === "Hutang" && !selectedCustomerId)
+                ? "bg-emerald-600 hover:bg-emerald-500 text-white active:scale-[0.99] shadow-emerald-700/20"
+                : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
+                }`}
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>
@@ -976,7 +1154,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
             </div>
 
             <p className="text-xs text-slate-600">
-              Transaksi ini melebihi limit kasbon pelanggan. Masukkan PIN Pemilik (default: <strong>1234</strong>) untuk melanjutkan.
+              Transaksi ini melebihi limit kasbon pelanggan. Masukkan PIN Pemilik atau Kode Pemulihan Darurat (REC-XXXX-XXXX) untuk melanjutkan.
             </p>
 
             <form
@@ -995,7 +1173,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                     setShowPinModal(false);
                     setPinInput("");
                   } else {
-                    setPinError("PIN Pemilik tidak tepat!");
+                    setPinError("PIN Pemilik atau Kode Pemulihan tidak tepat!");
                   }
                 } catch {
                   setPinError("Gagal memvalidasi PIN");
@@ -1006,11 +1184,11 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
               <input
                 type="password"
                 autoFocus
-                maxLength={6}
-                placeholder="PIN 4 digit..."
+                maxLength={20}
+                placeholder="PIN Pemilik atau REC-XXXX-XXXX..."
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
-                className="w-full text-center tracking-widest text-lg font-mono font-black py-2 border border-slate-300 rounded-xl focus:border-rose-500 focus:outline-none"
+                className="w-full text-center tracking-wider text-base font-mono font-bold py-2 border border-slate-300 rounded-xl focus:border-rose-500 focus:outline-none"
               />
 
               {pinError && (
