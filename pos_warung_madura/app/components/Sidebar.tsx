@@ -86,7 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: "kasir", label: "Kasir (POS)", icon: ShoppingCart, hotkey: "F2" },
     { id: "katalog", label: "Produk & Satuan", icon: Package, hotkey: "F3" },
     { id: "kulakan", label: "Kulakan Masuk", icon: Truck, hotkey: "F4" },
-    { id: "opname", label: "Stok Opname", icon: ClipboardCheck, hotkey: "F5" },
+    { id: "opname", label: "Manajemen Stok", icon: ClipboardCheck, hotkey: "F5" },
     { id: "kasbon", label: "Kasbon & Pelanggan", icon: Users, hotkey: "F6" },
     { id: "laporan", label: "Laporan & Omzet", icon: BarChart3, hotkey: "F7" },
   ] as const;

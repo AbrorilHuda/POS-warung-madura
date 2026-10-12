@@ -10,4 +10,5 @@ export default [
   route("api/report", "routes/api.report.ts"),
   route("api/shift", "routes/api.shift.ts"),
   route("api/returns", "routes/api.returns.ts"),
+  route("api/stock", "routes/api.stock.ts"),
 ] satisfies RouteConfig;

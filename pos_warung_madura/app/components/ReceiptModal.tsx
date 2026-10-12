@@ -443,10 +443,16 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                         <div className="font-bold text-slate-900 leading-tight">
                           {it.productName}
                         </div>
-                        <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                          {it.qty} {it.unitName} &times; Rp {it.price.toLocaleString("id-ID")}
+                        <div className="text-[11px] text-slate-500 font-mono mt-0.5 flex items-center gap-1.5 flex-wrap">
+                          <span>{it.qty} {it.unitName} &times; Rp {it.price.toLocaleString("id-ID")}</span>
+                          {(it.appliedTierName || it.isWholesalePrice) && (
+                            <span className="text-[9px] font-sans font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                              🏷️ {it.appliedTierName || "Harga Grosir"}
+                            </span>
+                          )}
                         </div>
                       </div>
+
 
                       <div className="text-right font-mono font-bold text-slate-900 shrink-0">
                         Rp {it.subtotal.toLocaleString("id-ID")}

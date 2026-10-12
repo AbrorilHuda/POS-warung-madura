@@ -10,8 +10,16 @@ import {
   X,
   Sparkles,
   Zap,
+  ChevronDown,
+  ChevronUp,
+  Tag,
+  AlertTriangle,
+  Users,
+  Percent,
 } from "lucide-react";
-import type { Product, ProductUnit } from "../types/pos";
+import type { Product, ProductUnit, ProductPriceTier, CustomerGroupType } from "../types/pos";
+import { validateTierList } from "../services/pricing";
+
 
 interface ProductCatalogProps {
   products: Product[];
@@ -77,8 +85,10 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
       price: number;
       costPrice: number;
       barcode: string;
+      priceTiers?: ProductPriceTier[];
     }>
   >([]);
+  const [expandedTiers, setExpandedTiers] = useState<Record<number, boolean>>({});
 
   const categories = [
     "Semua",
@@ -102,6 +112,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
     setCategory("Mie & Sembako");
     setBaseUnit("pcs");
     setInitialStock(40);
+    setExpandedTiers({});
     applyPackageTemplate("mie");
     setIsModalOpen(true);
   };
@@ -113,6 +124,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
     setCategory(prod.category);
     setBaseUnit(prod.baseUnit);
     setInitialStock(prod.stockInBaseUnit);
+    setExpandedTiers({});
     setUnits(
       prod.units.map((u) => ({
         id: u.id,
@@ -121,6 +133,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
         price: u.price,
         costPrice: u.costPrice || 0,
         barcode: u.barcode,
+        priceTiers: u.priceTiers ? u.priceTiers.map((t) => ({ ...t })) : [],
       }))
     );
     setIsModalOpen(true);
@@ -138,6 +151,20 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 27000,
           costPrice: 25000,
           barcode: generateRandomBarcode("8991"),
+          priceTiers: [
+            {
+              tierName: "Grosir Beli ≥ 5",
+              minQty: 5,
+              price: 26500,
+              customerGroup: "umum",
+            },
+            {
+              tierName: "Khusus Reseller Warung",
+              minQty: 5,
+              price: 26000,
+              customerGroup: "reseller",
+            },
+          ],
         },
         {
           unitName: "Slop (10 Bungkus)",
@@ -145,6 +172,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 265000,
           costPrice: 248000,
           barcode: generateRandomBarcode("8992"),
+          priceTiers: [],
         },
       ]);
     } else if (type === "mie") {
@@ -157,6 +185,20 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 3500,
           costPrice: 2900,
           barcode: generateRandomBarcode("8993"),
+          priceTiers: [
+            {
+              tierName: "Grosir Lusinan",
+              minQty: 12,
+              price: 3200,
+              customerGroup: "umum",
+            },
+            {
+              tierName: "Reseller Mitra",
+              minQty: 10,
+              price: 3000,
+              customerGroup: "reseller",
+            },
+          ],
         },
         {
           unitName: "Dus (40 Pcs)",
@@ -164,6 +206,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 135000,
           costPrice: 116000,
           barcode: generateRandomBarcode("8994"),
+          priceTiers: [],
         },
       ]);
     } else if (type === "kopi") {
@@ -176,6 +219,14 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 2000,
           costPrice: 1500,
           barcode: generateRandomBarcode("8995"),
+          priceTiers: [
+            {
+              tierName: "Grosir ≥ 10 Sachet",
+              minQty: 10,
+              price: 1800,
+              customerGroup: "umum",
+            },
+          ],
         },
         {
           unitName: "Renteng (10 Sachet)",
@@ -183,6 +234,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 18000,
           costPrice: 15000,
           barcode: generateRandomBarcode("8996"),
+          priceTiers: [],
         },
         {
           unitName: "Dus (120 Sachet)",
@@ -190,6 +242,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 210000,
           costPrice: 180000,
           barcode: generateRandomBarcode("8997"),
+          priceTiers: [],
         },
       ]);
     } else if (type === "minuman") {
@@ -202,6 +255,14 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 4000,
           costPrice: 3200,
           barcode: generateRandomBarcode("8998"),
+          priceTiers: [
+            {
+              tierName: "Grosir ≥ 6 Botol",
+              minQty: 6,
+              price: 3800,
+              customerGroup: "umum",
+            },
+          ],
         },
         {
           unitName: "Dus (24 Botol)",
@@ -209,6 +270,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 90000,
           costPrice: 76800,
           barcode: generateRandomBarcode("8999"),
+          priceTiers: [],
         },
       ]);
     } else if (type === "sabun") {
@@ -221,6 +283,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 1000,
           costPrice: 750,
           barcode: generateRandomBarcode("8990"),
+          priceTiers: [],
         },
         {
           unitName: "Renteng (12 Sachet)",
@@ -228,6 +291,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 11000,
           costPrice: 9000,
           barcode: generateRandomBarcode("8991"),
+          priceTiers: [],
         },
       ]);
     } else {
@@ -240,6 +304,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           price: 5000,
           costPrice: 4000,
           barcode: generateRandomBarcode("8992"),
+          priceTiers: [],
         },
       ]);
     }
@@ -254,6 +319,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
         price: 0,
         costPrice: 0,
         barcode: generateRandomBarcode("899"),
+        priceTiers: [],
       },
     ]);
   };
@@ -282,9 +348,96 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
     );
   };
 
+  // Handler toggle expand section harga bertingkat (PRD F3.2)
+  const handleToggleTierExpand = (idx: number) => {
+    setExpandedTiers((prev) => ({ ...prev, [idx]: !prev[idx] }));
+  };
+
+  // Tambah baris tier grosir baru untuk suatu unit
+  const handleAddTier = (unitIdx: number, preset?: Partial<ProductPriceTier>) => {
+    setUnits((prev) =>
+      prev.map((u, i) => {
+        if (i !== unitIdx) return u;
+        const currentTiers = u.priceTiers || [];
+        const defaultMinQty =
+          preset?.minQty ||
+          (currentTiers.length === 0 ? 12 : currentTiers[currentTiers.length - 1].minQty + 6);
+        const defaultPrice =
+          preset?.price ||
+          Math.max(0, Math.round((u.price || 0) * 0.9));
+        const newTier: ProductPriceTier = {
+          tierName: preset?.tierName || `Grosir ≥ ${defaultMinQty}`,
+          minQty: defaultMinQty,
+          price: defaultPrice,
+          customerGroup: (preset?.customerGroup as CustomerGroupType) || "umum",
+        };
+        return {
+          ...u,
+          priceTiers: [...currentTiers, newTier],
+        };
+      })
+    );
+    setExpandedTiers((prev) => ({ ...prev, [unitIdx]: true }));
+  };
+
+  // Hapus tier grosir tertentu
+  const handleRemoveTier = (unitIdx: number, tierIdx: number) => {
+    setUnits((prev) =>
+      prev.map((u, i) =>
+        i === unitIdx
+          ? {
+            ...u,
+            priceTiers: (u.priceTiers || []).filter((_, ti) => ti !== tierIdx),
+          }
+          : u
+      )
+    );
+  };
+
+  // Ubah nilai field tier grosir
+  const handleTierChange = (
+    unitIdx: number,
+    tierIdx: number,
+    field: keyof ProductPriceTier,
+    value: any
+  ) => {
+    setUnits((prev) =>
+      prev.map((u, i) => {
+        if (i !== unitIdx) return u;
+        const updatedTiers = (u.priceTiers || []).map((t, ti) =>
+          ti === tierIdx ? { ...t, [field]: value } : t
+        );
+        return { ...u, priceTiers: updatedTiers };
+      })
+    );
+  };
+
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+
+    // Validasi daftar tier & cek peringatan HPP (PRD F3.2 & F3.5)
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      const tiers = u.priceTiers || [];
+      if (tiers.length > 0) {
+        const val = validateTierList(tiers, Number(u.costPrice) || 0);
+        if (!val.isValid) {
+          alert(`Validasi Harga Grosir Satuan '${u.unitName}':\n\n• ${val.errors.join("\n• ")}`);
+          setExpandedTiers((prev) => ({ ...prev, [i]: true }));
+          return;
+        }
+        if (val.warnings.length > 0) {
+          const proceed = confirm(
+            `Peringatan HPP Satuan '${u.unitName}':\n\n• ${val.warnings.join("\n• ")}\n\nApakah Anda yakin ingin tetap menyimpan produk ini?`
+          );
+          if (!proceed) {
+            setExpandedTiers((prev) => ({ ...prev, [i]: true }));
+            return;
+          }
+        }
+      }
+    }
 
     const prodId = editingProductId || `prod-${Date.now()}`;
     const newUnits: ProductUnit[] = units.map((u, idx) => ({
@@ -296,6 +449,15 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
       costPrice: Number(u.costPrice) || 0,
       barcode: u.barcode.trim(),
       isBaseUnit: idx === 0,
+      priceTiers: (u.priceTiers || []).map((t, tIdx) => ({
+        id: t.id || `tier-${prodId}-${idx}-${tIdx}`,
+        productId: prodId,
+        unitId: u.id || `unit-${prodId}-${idx}`,
+        tierName: t.tierName?.trim() || `Grosir ≥ ${t.minQty}`,
+        minQty: Number(t.minQty) || 2,
+        price: Number(t.price) || 0,
+        customerGroup: (t.customerGroup as CustomerGroupType) || "umum",
+      })),
     }));
 
     const prodData: Product = {
@@ -315,6 +477,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
 
     setIsModalOpen(false);
   };
+
 
   const filtered = products.filter((p) => {
     const matchCat = selectedCategory === "Semua" || p.category === selectedCategory;
@@ -415,9 +578,20 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                   </span>
                   <h3 className="font-bold text-sm text-slate-900">{prod.name}</h3>
                 </div>
-                <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  Total Stok: {prod.stockInBaseUnit} {prod.baseUnit}
-                </span>
+                {prod.stockInBaseUnit <= 0 ? (
+                  <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200">
+                    Stok Habis (0 {prod.baseUnit})
+                  </span>
+                ) : prod.stockInBaseUnit <= (prod.minStockAlert || 5) ? (
+                  <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    Menipis: {prod.stockInBaseUnit} {prod.baseUnit}
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    Total Stok: {prod.stockInBaseUnit} {prod.baseUnit}
+                  </span>
+                )}
               </div>
 
               {/* Units Table */}
@@ -447,6 +621,31 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                         <Barcode className="w-3.5 h-3.5 text-slate-400" />
                         <span className="tracking-wide select-all">{unit.barcode}</span>
                       </div>
+
+                      {/* Info Tier Harga Grosir & Reseller (PRD F3.2) */}
+                      {unit.priceTiers && unit.priceTiers.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {unit.priceTiers.map((t, tIdx) => (
+                            <span
+                              key={t.id || tIdx}
+                              className={`inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+                                t.customerGroup === "reseller"
+                                  ? "bg-purple-50 text-purple-700 border-purple-200"
+                                  : t.customerGroup === "langganan"
+                                  ? "bg-blue-50 text-blue-700 border-blue-200"
+                                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              }`}
+                              title={`Harga grosir: minimal ${t.minQty} ${unit.unitName}`}
+                            >
+                              <span className="font-bold">≥{t.minQty}</span>
+                              <span>Rp {t.price.toLocaleString("id-ID")}</span>
+                              {t.customerGroup && t.customerGroup !== "umum" && (
+                                <span className="text-[8px] uppercase font-bold tracking-tight">({t.customerGroup})</span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="text-right">
@@ -725,8 +924,8 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                         </div>
                       </div>
 
-                      {/* Row 2: Form Inputs */}
-                      <div className="grid grid-cols-12 gap-2 items-center text-xs">
+                      {/* Row 2: Form Inputs (Termasuk Modal/HPP dan Barcode) */}
+                      <div className="grid grid-cols-12 gap-2 items-start text-xs">
                         {/* Nama Satuan */}
                         <div className="col-span-12 sm:col-span-3">
                           <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">
@@ -761,8 +960,24 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                           />
                         </div>
 
-                        {/* Harga Jual */}
-                        <div className="col-span-6 sm:col-span-3">
+                        {/* Modal / HPP */}
+                        <div className="col-span-6 sm:col-span-2">
+                          <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">
+                            Modal HPP (Rp)
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={u.costPrice || ""}
+                            onChange={(e) => handleUnitChange(idx, "costPrice", Number(e.target.value))}
+                            placeholder="Opsional..."
+                            className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-mono text-slate-700"
+                            title="Harga modal beli / kulakan dari agen"
+                          />
+                        </div>
+
+                        {/* Harga Jual Satuan */}
+                        <div className="col-span-6 sm:col-span-2">
                           <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">
                             Harga Jual (Rp)
                           </label>
@@ -778,7 +993,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                         </div>
 
                         {/* Barcode & Generate Button */}
-                        <div className="col-span-10 sm:col-span-3">
+                        <div className="col-span-6 sm:col-span-2">
                           <div className="flex items-center justify-between mb-0.5">
                             <label className="text-[10px] text-slate-500 font-semibold">Barcode</label>
                             <button
@@ -804,7 +1019,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                         </div>
 
                         {/* Delete Unit Row */}
-                        <div className="col-span-2 sm:col-span-1 text-center pt-3">
+                        <div className="col-span-12 sm:col-span-1 text-center pt-2 sm:pt-4">
                           {units.length > 1 && idx > 0 ? (
                             <button
                               type="button"
@@ -812,10 +1027,205 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                               className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
                               title="Hapus Satuan Ini"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           ) : null}
                         </div>
+                      </div>
+
+                      {/* Expandable Section: Harga Bertingkat & Grosir (PRD F3.2) */}
+                      <div className="mt-2 pt-2 border-t border-slate-200/60">
+                        <div className="flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleTierExpand(idx)}
+                            className="inline-flex items-center gap-2 text-xs font-bold text-slate-800 hover:text-amber-800 transition cursor-pointer"
+                          >
+                            <Tag className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Harga Bertingkat & Grosir</span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition ${
+                                (u.priceTiers || []).length > 0
+                                  ? "bg-amber-100 text-amber-900 border border-amber-300"
+                                  : "bg-slate-200/80 text-slate-600"
+                              }`}
+                            >
+                              {(u.priceTiers || []).length} Tier
+                            </span>
+                            {expandedTiers[idx] ? (
+                              <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                            )}
+                          </button>
+
+                          {!expandedTiers[idx] && (u.priceTiers || []).length > 0 && (
+                            <span className="text-[10px] text-slate-500 font-mono hidden sm:inline">
+                              Termurah: Rp {Math.min(...(u.priceTiers || []).map((t) => t.price)).toLocaleString("id-ID")}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Panel Pengaturan Tier Grosir */}
+                        {expandedTiers[idx] && (
+                          <div className="mt-2.5 p-3 rounded-xl bg-white border border-amber-200/80 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] text-slate-500">
+                              <span>
+                                Atur harga diskon untuk pembelian partai banyak (grosir) atau kelompok khusus reseller:
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddTier(idx, { minQty: 6, tierName: "Grosir ≥ 6", price: Math.max(0, Math.round(u.price * 0.95)), customerGroup: "umum" })}
+                                  className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition cursor-pointer"
+                                  title="Preset cepat: Grosir 6 pcs (diskon 5%)"
+                                >
+                                  + Grosir ≥ 6 (-5%)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddTier(idx, { minQty: 12, tierName: "Grosir Lusin", price: Math.max(0, Math.round(u.price * 0.9)), customerGroup: "umum" })}
+                                  className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition cursor-pointer"
+                                  title="Preset cepat: Grosir 12 pcs (diskon 10%)"
+                                >
+                                  + Grosir Lusin (-10%)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddTier(idx, { minQty: 5, tierName: "Khusus Reseller", price: Math.max(0, Math.round(u.price * 0.88)), customerGroup: "reseller" })}
+                                  className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 transition cursor-pointer"
+                                  title="Preset cepat: Khusus pelanggan Reseller"
+                                >
+                                  + Reseller (-12%)
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Daftar Baris Tier */}
+                            {(u.priceTiers || []).length === 0 ? (
+                              <div className="py-4 text-center border border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
+                                <span>Belum ada tier harga grosir untuk satuan ini.</span>
+                                <div className="mt-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddTier(idx)}
+                                    className="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] transition inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    <span>Tambah Tier Grosir Pertama</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {(u.priceTiers || []).map((tier, tIdx) => {
+                                  const isBelowCost = u.costPrice > 0 && tier.price < u.costPrice;
+                                  return (
+                                    <div
+                                      key={tIdx}
+                                      className={`p-2.5 rounded-xl border text-xs transition ${
+                                        isBelowCost
+                                          ? "bg-rose-50/60 border-rose-300"
+                                          : "bg-slate-50/80 border-slate-200"
+                                      }`}
+                                    >
+                                      <div className="grid grid-cols-12 gap-2 items-center">
+                                        {/* Nama Tier */}
+                                        <div className="col-span-12 sm:col-span-4">
+                                          <label className="block text-[9px] font-semibold text-slate-500 mb-0.5">
+                                            Nama Tier Label
+                                          </label>
+                                          <input
+                                            type="text"
+                                            value={tier.tierName}
+                                            onChange={(e) => handleTierChange(idx, tIdx, "tierName", e.target.value)}
+                                            placeholder="Contoh: Grosir Lusinan"
+                                            className="w-full px-2 py-1 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-800"
+                                          />
+                                        </div>
+
+                                        {/* Min Qty */}
+                                        <div className="col-span-4 sm:col-span-2">
+                                          <label className="block text-[9px] font-semibold text-slate-500 mb-0.5">
+                                            Min. Qty ({u.unitName})
+                                          </label>
+                                          <input
+                                            type="number"
+                                            min={2}
+                                            value={tier.minQty}
+                                            onChange={(e) => handleTierChange(idx, tIdx, "minQty", Number(e.target.value))}
+                                            className="w-full px-2 py-1 rounded-lg bg-white border border-slate-200 text-xs font-mono font-bold text-slate-800"
+                                          />
+                                        </div>
+
+                                        {/* Harga Tier per Satuan */}
+                                        <div className="col-span-4 sm:col-span-3">
+                                          <label className="block text-[9px] font-semibold text-slate-500 mb-0.5">
+                                            Harga Satuan (Rp)
+                                          </label>
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            value={tier.price}
+                                            onChange={(e) => handleTierChange(idx, tIdx, "price", Number(e.target.value))}
+                                            className="w-full px-2 py-1 rounded-lg bg-white border border-slate-200 text-xs font-mono font-bold text-slate-900"
+                                          />
+                                        </div>
+
+                                        {/* Tipe Pelanggan */}
+                                        <div className="col-span-3 sm:col-span-2">
+                                          <label className="block text-[9px] font-semibold text-slate-500 mb-0.5">
+                                            Target Pelanggan
+                                          </label>
+                                          <select
+                                            value={tier.customerGroup || "umum"}
+                                            onChange={(e) => handleTierChange(idx, tIdx, "customerGroup", e.target.value as CustomerGroupType)}
+                                            className="w-full px-1.5 py-1 rounded-lg bg-white border border-slate-200 text-[11px] font-semibold text-slate-800"
+                                          >
+                                            <option value="umum">Umum (Semua)</option>
+                                            <option value="langganan">Langganan</option>
+                                            <option value="reseller">Reseller</option>
+                                          </select>
+                                        </div>
+
+                                        {/* Hapus Tier */}
+                                        <div className="col-span-1 text-right pt-2 sm:pt-4">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveTier(idx, tIdx)}
+                                            className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-100 transition cursor-pointer"
+                                            title="Hapus Tier Ini"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      {/* Peringatan di bawah HPP (PRD F3.5) */}
+                                      {isBelowCost && (
+                                        <div className="mt-1 flex items-center gap-1.5 text-[10px] text-rose-600 font-semibold">
+                                          <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                          <span>
+                                            Peringatan: Harga jual grosir Rp {tier.price.toLocaleString("id-ID")} berada di bawah modal HPP (Rp {u.costPrice.toLocaleString("id-ID")})!
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddTier(idx)}
+                                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>Tambah Baris Tier Lain</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

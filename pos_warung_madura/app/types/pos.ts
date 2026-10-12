@@ -1,14 +1,30 @@
 export type UnitType = 'pcs' | 'pack' | 'slop' | 'dus' | 'renteng' | 'karton' | 'kg' | 'liter' | 'butir' | 'batang' | 'tabung';
 
+export type CustomerGroupType = 'umum' | 'langganan' | 'reseller';
+
+// ----------------------------------------------------------------------------
+// HARGA BERTINGKAT & GROSIR / RESELLER (PRD F3)
+// ----------------------------------------------------------------------------
+export interface ProductPriceTier {
+  id?: string;
+  productId?: string;
+  unitId?: string;
+  tierName: string; // e.g. "Grosir", "Reseller", "Kartonan"
+  minQty: number; // minimum quantity to trigger this price (e.g. >= 12)
+  price: number; // selling price per unit at this tier
+  customerGroup?: CustomerGroupType | null; // target customer group (null/undefined/umum = berlaku untuk semua)
+}
+
 export interface ProductUnit {
   id: string;
   productId: string;
   unitName: string; // e.g. "Pcs", "Pack", "Slop", "Dus"
   conversionRatio: number; // multiplier to base unit, e.g. Pack = 12 pcs, Slop = 120 pcs, Dus = 40 pcs
-  price: number; // selling price for this unit
+  price: number; // selling price for this unit (base/normal minQty = 1)
   costPrice?: number; // estimated purchase price
   barcode: string; // specific barcode for this unit
   isBaseUnit?: boolean;
+  priceTiers?: ProductPriceTier[]; // Tingkat harga grosir & reseller (PRD F3)
 }
 
 export interface Product {
@@ -29,10 +45,13 @@ export interface CartItem {
   unitId: string;
   unitName: string;
   conversionRatio: number;
-  price: number;
+  basePrice: number; // harga normal satuan (sebelum diskon tier)
+  price: number; // harga satuan aktif setelah kalkulasi tier
   qty: number;
   barcode: string;
   costPrice?: number;
+  appliedTierName?: string; // e.g. "Grosir (Min 12)" atau "Reseller"
+  isWholesalePrice?: boolean;
 }
 
 export interface SaleItemSnapshot {
@@ -44,7 +63,11 @@ export interface SaleItemSnapshot {
   qty: number;
   subtotal: number;
   costPrice?: number;
+  basePrice?: number;
+  appliedTierName?: string;
+  isWholesalePrice?: boolean;
 }
+
 
 export interface Sale {
   id: string;
@@ -79,6 +102,9 @@ export interface StockMovement {
   unitNameUsed: string;
   unitQtyUsed: number;
   costPerUnit?: number;
+  referenceType?: string;
+  referenceId?: string;
+  batchId?: string;
   notes: string;
   timestamp: string;
 }
@@ -90,16 +116,105 @@ export interface StockOpnameItem {
   systemStock: number;
   physicalStock: number;
   difference: number;
+  costPrice?: number;
+  financialDiff?: number;
   notes?: string;
 }
 
 export interface StockOpnameSession {
   id: string;
+  sessionCode?: string;
   date: string;
   status: 'draft' | 'completed';
+  categoryFilter?: string | null;
+  totalItems?: number;
   totalDiscrepancyItems: number;
+  totalFinancialDiff?: number;
   notes: string;
   items: StockOpnameItem[];
+  completedAt?: string | null;
+}
+
+// ----------------------------------------------------------------------------
+// MANAJEMEN STOK LANJUTAN (PRD F7)
+// ----------------------------------------------------------------------------
+export type ExpiryStatus = 'safe' | 'warning_30' | 'warning_7' | 'expired';
+
+export interface StockBatch {
+  id: string;
+  productId: string;
+  productName?: string;
+  category?: string;
+  baseUnit?: string;
+  batchNo: string;
+  qtyBase: number;
+  initialQtyBase: number;
+  costPrice: number;
+  expiryDate: string | null; // YYYY-MM-DD
+  receivedAt: string;
+  notes?: string | null;
+  daysUntilExpiry?: number | null;
+  expiryStatus?: ExpiryStatus;
+}
+
+export type StockAdjustmentReason =
+  | 'rusak'
+  | 'hilang'
+  | 'kedaluwarsa'
+  | 'konsumsi_sendiri'
+  | 'koreksi';
+
+export interface StockAdjustmentInput {
+  productId: string;
+  qtyDiff: number; // negatif untuk keluar, positif untuk masuk
+  reasonCategory: StockAdjustmentReason;
+  notes?: string;
+  batchId?: string;
+  approvedBy?: string;
+}
+
+export interface StockCardEntry {
+  id: string;
+  date: string;
+  type: 'in' | 'out' | 'adjustment';
+  refType: string;
+  refId?: string;
+  qtyChange: number;
+  unitNameUsed: string;
+  unitQtyUsed: number;
+  runningBalance: number;
+  costPerUnit?: number;
+  notes: string;
+  batchNo?: string;
+  batchExpiry?: string | null;
+}
+
+export interface ReorderRecommendation {
+  productId: string;
+  productName: string;
+  category: string;
+  baseUnit: string;
+  currentStock: number;
+  minStock: number;
+  avgDailySales: number;
+  daysOfStockLeft: number;
+  suggestedOrderQty: number;
+  lastCostPrice: number;
+  estimatedTotalCost: number;
+  urgency: 'critical' | 'warning' | 'normal';
+}
+
+export interface StockOpnameSessionRecord {
+  id: string;
+  sessionCode: string;
+  status: 'draft' | 'completed';
+  categoryFilter?: string | null;
+  totalItems: number;
+  totalDiscrepancyItems: number;
+  totalFinancialDiff: number;
+  notes?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
 }
 
 // ----------------------------------------------------------------------------
@@ -110,6 +225,7 @@ export interface Customer {
   name: string;
   phone?: string;
   address?: string;
+  customerGroup?: CustomerGroupType; // 'umum' | 'langganan' | 'reseller' (PRD F3.3)
   creditLimit: number;
   isActive: boolean;
   notes?: string;

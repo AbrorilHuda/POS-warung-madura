@@ -16,14 +16,21 @@ import {
   Users,
   Lock,
   Layers,
+  Tag,
+  Sparkles,
+  Upload,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import confetti from "canvas-confetti";
+
 import {
   sendCustomerDisplayEvent,
   listenKasirRequestState,
 } from "../services/customerDisplaySync";
-import type { Product, ProductUnit, CartItem, Sale, CustomerSummary } from "../types/pos";
+import type { Product, ProductUnit, CartItem, Sale, CustomerSummary, CustomerGroupType } from "../types/pos";
 import type { StoreConfig } from "../services/pos.server";
+import { calculateTieredPrice, getNextTierUpsell } from "../services/pricing";
+
 
 interface KasirPOSProps {
   products: Product[];
@@ -69,6 +76,8 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
   const [splitNonCashAmount, setSplitNonCashAmount] = useState<number>(0);
   const [splitNonCashMethod, setSplitNonCashMethod] = useState<"QRIS" | "Transfer">("QRIS");
   const [splitRefNo, setSplitRefNo] = useState<string>("");
+  const [customQrisImage, setCustomQrisImage] = useState<string | null>(null);
+  const qrisFileInputRef = useRef<HTMLInputElement>(null);
 
   const [invoiceSeq, setInvoiceSeq] = useState<number>(nextInvoiceSeq || 141);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -84,10 +93,193 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
       .catch(() => { });
   }, []);
 
+  const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
+  const activeCustomerGroup: CustomerGroupType = (selectedCustomer?.customerGroup as CustomerGroupType) || "umum";
+
   const storePrefix = storeConfig?.storeCode || "WM01";
   const currentInvoiceCode = `${storePrefix}-${String(invoiceSeq).padStart(6, "0")}`;
   const grandTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const changeAmount = Math.max(0, paidAmount - grandTotal);
+
+  // Inisialisasi gambar stiker QRIS dari localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedImg = localStorage.getItem("pos_qris_custom_image");
+      if (savedImg) {
+        setCustomQrisImage(savedImg);
+      }
+    }
+  }, []);
+
+  const handleUploadQrisImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        setCustomQrisImage(dataUrl);
+        try {
+          localStorage.setItem("pos_qris_custom_image", dataUrl);
+        } catch (err) {
+          console.warn("Penyimpanan lokal penuh atau gagal menyimpan gambar QRIS:", err);
+        }
+        if (showQrisModal) {
+          sendCustomerDisplayEvent({
+            type: "SHOW_QRIS",
+            amount: paymentMethod === "Campuran" ? splitNonCashAmount : grandTotal,
+            invoiceCode: currentInvoiceCode,
+            storeName: storeConfig?.storeName || "Warung Madura Berkah",
+            customQrisImage: dataUrl,
+            items: cart.map((c) => ({
+              productName: c.productName,
+              unitName: c.unitName,
+              price: c.price,
+              qty: c.qty,
+              subtotal: c.price * c.qty,
+            })),
+            itemCount: cart.reduce((s, it) => s + it.qty, 0),
+            timestamp: Date.now(),
+          });
+        }
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveCustomQrisImage = () => {
+    setCustomQrisImage(null);
+    try {
+      localStorage.removeItem("pos_qris_custom_image");
+    } catch { }
+    if (showQrisModal) {
+      sendCustomerDisplayEvent({
+        type: "SHOW_QRIS",
+        amount: paymentMethod === "Campuran" ? splitNonCashAmount : grandTotal,
+        invoiceCode: currentInvoiceCode,
+        storeName: storeConfig?.storeName || "Warung Madura Berkah",
+        customQrisImage: null,
+        items: cart.map((c) => ({
+          productName: c.productName,
+          unitName: c.unitName,
+          price: c.price,
+          qty: c.qty,
+          subtotal: c.price * c.qty,
+        })),
+        itemCount: cart.reduce((s, it) => s + it.qty, 0),
+        timestamp: Date.now(),
+      });
+    }
+  };
+
+  const handleOpenQrisModal = (amount: number) => {
+    setShowQrisModal(true);
+    const effectiveImg = customQrisImage || (typeof window !== "undefined" ? localStorage.getItem("pos_qris_custom_image") : null);
+    sendCustomerDisplayEvent({
+      type: "SHOW_QRIS",
+      amount,
+      invoiceCode: currentInvoiceCode,
+      storeName: storeConfig?.storeName || "Warung Madura Berkah",
+      customQrisImage: effectiveImg,
+      items: cart.map((item) => ({
+        productName: item.productName,
+        unitName: item.unitName,
+        price: item.price,
+        qty: item.qty,
+        subtotal: item.price * item.qty,
+      })),
+      itemCount: cart.reduce((acc, it) => acc + it.qty, 0),
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleCloseQrisModal = () => {
+    setShowQrisModal(false);
+    if (cart.length > 0) {
+      sendCustomerDisplayEvent({
+        type: "CART_UPDATE",
+        invoiceCode: currentInvoiceCode,
+        items: cart.map((item) => ({
+          productName: item.productName,
+          unitName: item.unitName,
+          price: item.price,
+          qty: item.qty,
+          subtotal: item.price * item.qty,
+        })),
+        totalAmount: grandTotal,
+        itemCount: cart.reduce((acc, it) => acc + it.qty, 0),
+        timestamp: Date.now(),
+      });
+    } else {
+      sendCustomerDisplayEvent({
+        type: "STANDBY",
+        timestamp: Date.now(),
+      });
+    }
+  };
+
+  const handleConfirmQrisPayment = () => {
+    if (paymentMethod === "QRIS") {
+      setPaidAmount(grandTotal);
+    }
+    handleCloseQrisModal();
+    try {
+      confetti({
+        particleCount: 50,
+        spread: 60,
+        origin: { y: 0.8 },
+      });
+    } catch { }
+  };
+
+  useEffect(() => {
+    if (!showQrisModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        handleCloseQrisModal();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showQrisModal, cart, currentInvoiceCode, grandTotal]);
+
+  // Sinkronisasi ulang harga bertingkat keranjang saat pelanggan atau produk berubah (PRD F3.3)
+  useEffect(() => {
+    setCart((prevCart) => {
+      if (prevCart.length === 0) return prevCart;
+      let hasChange = false;
+      const updated = prevCart.map((item) => {
+        const prod = products.find((p) => p.id === item.productId);
+        const unit = prod?.units.find((u) => u.id === item.unitId);
+        if (!unit) return item;
+
+        const tierCalc = calculateTieredPrice({
+          unit,
+          qty: item.qty,
+          customerGroup: activeCustomerGroup,
+        });
+
+        if (
+          item.price !== tierCalc.price ||
+          item.basePrice !== tierCalc.basePrice ||
+          item.appliedTierName !== tierCalc.appliedTierName ||
+          item.isWholesalePrice !== tierCalc.isWholesalePrice
+        ) {
+          hasChange = true;
+          return {
+            ...item,
+            price: tierCalc.price,
+            basePrice: tierCalc.basePrice,
+            appliedTierName: tierCalc.appliedTierName,
+            isWholesalePrice: tierCalc.isWholesalePrice,
+          };
+        }
+        return item;
+      });
+      return hasChange ? updated : prevCart;
+    });
+  }, [selectedCustomerId, activeCustomerGroup, products]);
+
 
   // Simpan nilai terkini di refs agar listener REQUEST_STATE tidak perlu di-bind ulang setiap render
   const cartRef = useRef(cart);
@@ -96,6 +288,14 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
   grandTotalRef.current = grandTotal;
   const currentInvoiceCodeRef = useRef(currentInvoiceCode);
   currentInvoiceCodeRef.current = currentInvoiceCode;
+  const showQrisModalRef = useRef(showQrisModal);
+  showQrisModalRef.current = showQrisModal;
+  const customQrisImageRef = useRef(customQrisImage);
+  customQrisImageRef.current = customQrisImage;
+  const paymentMethodRef = useRef(paymentMethod);
+  paymentMethodRef.current = paymentMethod;
+  const splitNonCashAmountRef = useRef(splitNonCashAmount);
+  splitNonCashAmountRef.current = splitNonCashAmount;
 
   useEffect(() => {
     if (nextInvoiceSeq && nextInvoiceSeq > invoiceSeq) {
@@ -114,6 +314,11 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
 
   // Kirim update keranjang ke Layar Pelanggan (Customer Display) realtime
   useEffect(() => {
+    if (showQrisModal) {
+      // Jika modal QRIS sedang dibuka, JANGAN menimpa tampilan layar pelanggan dengan CART_UPDATE
+      return;
+    }
+
     if (cart.length > 0) {
       sendCustomerDisplayEvent({
         type: "CART_UPDATE",
@@ -136,7 +341,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
         timestamp: Date.now(),
       });
     }
-  }, [cart, grandTotal, currentInvoiceCode]);
+  }, [cart, grandTotal, currentInvoiceCode, showQrisModal]);
 
   // Tanggapi REQUEST_STATE dari layar pelanggan (/display) - DIPASANG 1 KALI SAJA
   useEffect(() => {
@@ -144,6 +349,31 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
       const currentCart = cartRef.current;
       const currentTotal = grandTotalRef.current;
       const currentCode = currentInvoiceCodeRef.current;
+
+      // Jika modal QRIS sedang aktif, balas langsung dengan status SHOW_QRIS
+      if (showQrisModalRef.current) {
+        const qrisAmount = paymentMethodRef.current === "Campuran"
+          ? splitNonCashAmountRef.current
+          : currentTotal;
+        const effectiveImg = customQrisImageRef.current || (typeof window !== "undefined" ? localStorage.getItem("pos_qris_custom_image") : null);
+        sendCustomerDisplayEvent({
+          type: "SHOW_QRIS",
+          amount: qrisAmount,
+          invoiceCode: currentCode,
+          storeName: storeConfig?.storeName || "Warung Madura Berkah",
+          customQrisImage: effectiveImg,
+          items: currentCart.map((c) => ({
+            productName: c.productName,
+            unitName: c.unitName,
+            price: c.price,
+            qty: c.qty,
+            subtotal: c.price * c.qty,
+          })),
+          itemCount: currentCart.reduce((s, it) => s + it.qty, 0),
+          timestamp: Date.now(),
+        });
+        return;
+      }
 
       if (currentCart.length > 0) {
         sendCustomerDisplayEvent({
@@ -174,7 +404,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
       }
     });
     return unsub;
-  }, []);
+  }, [storeConfig?.storeName]);
 
   useEffect(() => {
     if (quickScanTriggerBarcode) {
@@ -238,9 +468,30 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
 
       if (existingIndex > -1) {
         const updated = [...prevCart];
-        updated[existingIndex].qty += qtyToAdd;
+        const targetItem = updated[existingIndex];
+        const newQty = targetItem.qty + qtyToAdd;
+        const tierCalc = calculateTieredPrice({
+          unit,
+          qty: newQty,
+          customerGroup: activeCustomerGroup,
+        });
+
+        updated[existingIndex] = {
+          ...targetItem,
+          qty: newQty,
+          price: tierCalc.price,
+          basePrice: tierCalc.basePrice,
+          appliedTierName: tierCalc.appliedTierName,
+          isWholesalePrice: tierCalc.isWholesalePrice,
+        };
         return updated;
       } else {
+        const tierCalc = calculateTieredPrice({
+          unit,
+          qty: qtyToAdd,
+          customerGroup: activeCustomerGroup,
+        });
+
         const newItem: CartItem = {
           id: `cart-${product.id}-${unit.id}-${Date.now()}`,
           productId: product.id,
@@ -248,7 +499,10 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
           unitId: unit.id,
           unitName: unit.unitName,
           conversionRatio: unit.conversionRatio,
-          price: unit.price,
+          price: tierCalc.price,
+          basePrice: tierCalc.basePrice,
+          appliedTierName: tierCalc.appliedTierName,
+          isWholesalePrice: tierCalc.isWholesalePrice,
           qty: qtyToAdd,
           barcode: unit.barcode,
           costPrice: unit.costPrice,
@@ -264,7 +518,27 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
       return;
     }
     setCart((prev) =>
-      prev.map((item) => (item.id === cartId ? { ...item, qty: newQty } : item))
+      prev.map((item) => {
+        if (item.id !== cartId) return item;
+        const parent = products.find((p) => p.id === item.productId);
+        const unit = parent?.units.find((u) => u.id === item.unitId);
+        if (!unit) return { ...item, qty: newQty };
+
+        const tierCalc = calculateTieredPrice({
+          unit,
+          qty: newQty,
+          customerGroup: activeCustomerGroup,
+        });
+
+        return {
+          ...item,
+          qty: newQty,
+          price: tierCalc.price,
+          basePrice: tierCalc.basePrice,
+          appliedTierName: tierCalc.appliedTierName,
+          isWholesalePrice: tierCalc.isWholesalePrice,
+        };
+      })
     );
   };
 
@@ -281,18 +555,28 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
         const newUnit = parentProduct.units.find((u) => u.id === newUnitId);
         if (!newUnit) return item;
 
+        const tierCalc = calculateTieredPrice({
+          unit: newUnit,
+          qty: item.qty,
+          customerGroup: activeCustomerGroup,
+        });
+
         return {
           ...item,
           unitId: newUnit.id,
           unitName: newUnit.unitName,
           conversionRatio: newUnit.conversionRatio,
-          price: newUnit.price,
+          price: tierCalc.price,
+          basePrice: tierCalc.basePrice,
+          appliedTierName: tierCalc.appliedTierName,
+          isWholesalePrice: tierCalc.isWholesalePrice,
           costPrice: newUnit.costPrice,
           barcode: newUnit.barcode,
         };
       })
     );
   };
+
 
   const clearCart = (broadcastStandby = true) => {
     setCart([]);
@@ -400,15 +684,19 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
         qty: c.qty,
         subtotal: c.price * c.qty,
         costPrice: c.costPrice,
+        basePrice: c.basePrice,
+        appliedTierName: c.appliedTierName,
+        isWholesalePrice: c.isWholesalePrice,
       })),
       totalAmount: grandTotal,
       paidAmount: actualPaid,
       changeAmount: actualChange,
       paymentMethod: isKasbon ? "Kasbon" : paymentMethod,
       splitPayments: splitPaymentsList,
-      customerId: isKasbon ? selectedCustomerId : undefined,
-      customerName: isKasbon ? selectedCustomer?.name : undefined,
+      customerId: selectedCustomerId || undefined,
+      customerName: selectedCustomer?.name || undefined,
       customerDebtRemaining: isKasbon ? (selectedCustomer?.totalDebt || 0) + debtRemainder : undefined,
+
       syncStatus: "pending",
       cashierName: activeShift?.cashierName || storeConfig?.cashierName || "Cak Mat",
     };
@@ -679,6 +967,53 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
             </div>
           </div>
 
+          {/* 1.1 Bilah Pilihan Pelanggan / Reseller (PRD F3.3 & F1.2) */}
+          <div className="mt-2.5 p-2 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span className="text-[11px] font-bold text-slate-600 shrink-0">Pelanggan:</span>
+              <select
+                value={selectedCustomerId}
+                onChange={(e) => {
+                  setSelectedCustomerId(e.target.value);
+                  setIsPinApproved(false);
+                }}
+                className="text-xs font-semibold bg-white border border-slate-200 rounded-xl px-2 py-1 text-slate-800 flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-slate-900"
+              >
+                <option value="">Umum (Bukan Reseller / Non-Member)</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} {c.customerGroup && c.customerGroup !== "umum" ? `[${c.customerGroup.toUpperCase()}]` : ""} {c.totalDebt > 0 ? `(Utang Rp ${c.totalDebt.toLocaleString("id-ID")})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedCustomer && (
+              <div className="flex items-center gap-1 shrink-0">
+                <span
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
+                    selectedCustomer.customerGroup === "reseller"
+                      ? "bg-purple-100 text-purple-800 border border-purple-300"
+                      : selectedCustomer.customerGroup === "langganan"
+                      ? "bg-blue-100 text-blue-800 border border-blue-300"
+                      : "bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  {selectedCustomer.customerGroup || "Umum"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCustomerId("")}
+                  className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition cursor-pointer"
+                  title="Reset ke Pelanggan Umum"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Peringatan Shift Kasir Belum Dibuka (PRD F5.3) */}
           {!activeShift && (
             <button
@@ -727,6 +1062,14 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
               cart.map((item) => {
                 const parent = products.find((p) => p.id === item.productId);
                 const availableUnits = parent ? parent.units : [];
+                const currentUnit = availableUnits.find((u) => u.id === item.unitId);
+                const upsell = currentUnit
+                  ? getNextTierUpsell({
+                      unit: currentUnit,
+                      qty: item.qty,
+                      customerGroup: activeCustomerGroup,
+                    })
+                  : null;
 
                 return (
                   <div
@@ -735,9 +1078,18 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <h5 className="font-bold text-slate-900 text-xs leading-snug truncate">
-                          {item.productName}
-                        </h5>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h5 className="font-bold text-slate-900 text-xs leading-snug truncate">
+                            {item.productName}
+                          </h5>
+                          {item.isWholesalePrice && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-1.5 py-0.2 rounded-md">
+                              <Tag className="w-2.5 h-2.5 text-emerald-600" />
+                              <span>{item.appliedTierName || "Harga Grosir"}</span>
+                            </span>
+                          )}
+                        </div>
+
                         <div className="mt-1 flex items-center gap-1.5">
                           <select
                             value={item.unitId}
@@ -757,6 +1109,11 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                         <span className="font-mono font-bold text-sm text-slate-900 block">
                           Rp {(item.price * item.qty).toLocaleString("id-ID")}
                         </span>
+                        {item.isWholesalePrice && item.basePrice && item.basePrice > item.price && (
+                          <span className="text-[10px] font-semibold text-emerald-600 font-mono block">
+                            Hemat Rp {((item.basePrice - item.price) * item.qty).toLocaleString("id-ID")}
+                          </span>
+                        )}
                         <button
                           onClick={() => removeFromCart(item.id)}
                           className="text-slate-400 hover:text-rose-600 mt-0.5 transition cursor-pointer p-0.5"
@@ -769,9 +1126,22 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
 
                     {/* Stepper Jumlah Barang Ramah Sentuh */}
                     <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/60">
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        @ Rp {item.price.toLocaleString("id-ID")}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {item.isWholesalePrice && item.basePrice && item.basePrice > item.price ? (
+                          <div className="text-[10px] font-mono">
+                            <span className="line-through text-slate-400 mr-1">
+                              Rp {item.basePrice.toLocaleString("id-ID")}
+                            </span>
+                            <span className="font-bold text-emerald-700">
+                              @ Rp {item.price.toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            @ Rp {item.price.toLocaleString("id-ID")}
+                          </span>
+                        )}
+                      </div>
 
                       <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-xl border border-slate-200 shadow-2xs">
                         <button
@@ -799,6 +1169,24 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {/* Rekomendasi Upsell Tier Berikutnya (PRD F3.3) */}
+                    {upsell && (
+                      <div className="mt-1.5 p-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-1 min-w-0">
+                          <Sparkles className="w-3 h-3 text-amber-600 shrink-0" />
+                          <span className="truncate">{upsell.message}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => updateCartItemQty(item.id, item.qty + upsell.qtyNeeded)}
+                          className="px-2 py-0.5 rounded-lg bg-amber-200/90 hover:bg-amber-300 text-amber-950 font-bold text-[10px] transition cursor-pointer shrink-0 active:scale-95 shadow-2xs"
+                          title={`Tambah ${upsell.qtyNeeded} lagi untuk dapat diskon grosir`}
+                        >
+                          +{upsell.qtyNeeded} {item.unitName}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -809,9 +1197,28 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
           <div className="pt-3.5 border-t border-slate-100 space-y-3 shrink-0">
             {/* Display Total Belanja Utama */}
             <div className="flex items-baseline justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Total Tagihan:
-              </span>
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">
+                  Total Tagihan:
+                </span>
+                {(() => {
+                  const totalSavings = cart.reduce((sum, item) => {
+                    if (item.isWholesalePrice && item.basePrice && item.basePrice > item.price) {
+                      return sum + (item.basePrice - item.price) * item.qty;
+                    }
+                    return sum;
+                  }, 0);
+                  if (totalSavings > 0) {
+                    return (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded mt-0.5">
+                        <Tag className="w-2.5 h-2.5" />
+                        Hemat Grosir: Rp {totalSavings.toLocaleString("id-ID")}
+                      </span>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
               <span className="font-mono text-3xl font-black text-slate-900 tracking-tight">
                 Rp {grandTotal.toLocaleString("id-ID")}
               </span>
@@ -825,6 +1232,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                 { id: "Hutang", icon: FileText, label: "Kasbon" },
                 { id: "Campuran", icon: Layers, label: "Split" },
               ].map(({ id, icon: Icon, label }) => {
+
                 const isSelected = paymentMethod === id;
                 return (
                   <button
@@ -863,7 +1271,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                   </span>
                   <button
                     type="button"
-                    onClick={() => setShowQrisModal(true)}
+                    onClick={() => handleOpenQrisModal(grandTotal)}
                     className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] transition cursor-pointer"
                   >
                     Tampilkan QRIS
@@ -899,14 +1307,26 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-semibold text-slate-700">1. Porsi Non-Tunai:</span>
-                    <select
-                      value={splitNonCashMethod}
-                      onChange={(e) => setSplitNonCashMethod(e.target.value as any)}
-                      className="px-2 py-0.5 rounded-lg bg-white border border-indigo-300 font-semibold text-[10px] outline-none"
-                    >
-                      <option value="QRIS">QRIS Toko</option>
-                      <option value="Transfer">Transfer Bank</option>
-                    </select>
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={splitNonCashMethod}
+                        onChange={(e) => setSplitNonCashMethod(e.target.value as any)}
+                        className="px-2 py-0.5 rounded-lg bg-white border border-indigo-300 font-semibold text-[10px] outline-none"
+                      >
+                        <option value="QRIS">QRIS Toko</option>
+                        <option value="Transfer">Transfer Bank</option>
+                      </select>
+                      {splitNonCashMethod === "QRIS" && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenQrisModal(splitNonCashAmount)}
+                          className="px-2 py-0.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] transition cursor-pointer flex items-center gap-1"
+                        >
+                          <QrCode className="w-3 h-3" />
+                          <span>Tampilkan QRIS</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="relative">
                     <span className="absolute left-2.5 top-1.5 text-slate-400 font-mono font-bold text-[11px]">Rp</span>
@@ -1218,6 +1638,193 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL QRIS STATIS TOKO (PRD F4.3)                                         */}
+      {/* ========================================================================= */}
+      {showQrisModal && (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-sm sm:max-w-md w-full border border-slate-200 overflow-hidden my-auto animate-in zoom-in-95 duration-150">
+            {/* Header Resmi QRIS */}
+            <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white px-5 py-3.5 flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                  <QrCode className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-red-100 leading-none">
+                    QRIS Standar Nasional
+                  </div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-white tracking-wide mt-0.5">
+                    PEMBAYARAN QRIS TOKO
+                  </h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseQrisModal}
+                className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition cursor-pointer"
+                title="Tutup (Esc)"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Isi Konten Modal */}
+            <div className="p-4 sm:p-5 space-y-3.5">
+              {/* Info Toko & Faktur */}
+              <div className="text-center pb-2 border-b border-slate-100">
+                <h4 className="font-black text-base sm:text-lg text-slate-800 tracking-tight uppercase">
+                  {storeConfig?.storeName || "WARUNG MADURA BERKAH"}
+                </h4>
+                <p className="text-xs text-slate-500 font-medium">
+                  {storeConfig?.storeAddress || storeConfig?.storeCity || "Toko Kelontong Madura 24 Jam"}
+                </p>
+                <div className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-[11px] font-mono text-slate-600 font-semibold">
+                  <span>No. Faktur: {currentInvoiceCode}</span>
+                </div>
+              </div>
+
+              {/* Nominal Tagihan */}
+              <div className="bg-gradient-to-br from-slate-50 to-blue-50/40 border border-blue-200/80 rounded-2xl p-3 text-center">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  Total Tagihan Yang Harus Dibayar
+                </div>
+                <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-600 tracking-tight mt-0.5">
+                  Rp {(paymentMethod === "Campuran" ? splitNonCashAmount : grandTotal).toLocaleString("id-ID")}
+                </div>
+                {paymentMethod === "Campuran" && (
+                  <div className="text-[10px] text-indigo-600 font-semibold mt-0.5">
+                    (Porsi Non-Tunai Split Payment)
+                  </div>
+                )}
+              </div>
+
+              {/* Area Barcode / Stiker QRIS */}
+              <div className="p-3 bg-white rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center">
+                {customQrisImage ? (
+                  <div className="w-full flex flex-col items-center">
+                    <div className="relative group max-w-[240px] w-full flex items-center justify-center bg-slate-50 p-2 rounded-xl border border-slate-200">
+                      <img
+                        src={customQrisImage}
+                        alt="Stiker QRIS Toko"
+                        className="w-full max-h-[220px] object-contain rounded-lg"
+                      />
+                    </div>
+                    <div className="flex items-center gap-3 mt-2 text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => qrisFileInputRef.current?.click()}
+                        className="text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Upload className="w-3 h-3" />
+                        <span>Ganti Stiker</span>
+                      </button>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={handleRemoveCustomQrisImage}
+                        className="text-rose-500 hover:text-rose-600 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Hapus</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full flex flex-col items-center">
+                    <div className="p-3 bg-white rounded-xl shadow-xs border border-slate-200">
+                      <QRCodeSVG
+                        value={`${storeConfig?.storeName || "WARUNG MADURA"}|QRIS|INV:${currentInvoiceCode}|TOTAL:${paymentMethod === "Campuran" ? splitNonCashAmount : grandTotal}`}
+                        size={180}
+                        level="M"
+                        includeMargin={false}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-2 text-center">
+                      QR Barcode otomatis sistem kasir
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => qrisFileInputRef.current?.click()}
+                      className="mt-2 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer border border-blue-200"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Unggah Stiker QRIS Toko (Foto / Scan)</span>
+                    </button>
+                  </div>
+                )}
+                <input
+                  ref={qrisFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleUploadQrisImage}
+                />
+              </div>
+
+              {/* Logo Bank & E-Wallet Yang Didukung */}
+              <div className="space-y-1">
+                <div className="text-[10px] text-slate-400 text-center font-medium">
+                  Menerima pembayaran dari seluruh aplikasi:
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-1">
+                  {["BCA", "Mandiri", "BRI", "BNI", "GoPay", "OVO", "DANA", "ShopeePay"].map((bank) => (
+                    <span
+                      key={bank}
+                      className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 font-bold text-[9px] border border-slate-200"
+                    >
+                      {bank}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Input Nomor Referensi / RRN */}
+              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700">
+                    No. Referensi / RRN Bukti Transfer:
+                  </span>
+                  <span className="text-[9px] text-slate-400 font-medium">Opsional</span>
+                </div>
+                <input
+                  type="text"
+                  value={paymentMethod === "Campuran" ? splitRefNo : qrisRefNo}
+                  onChange={(e) => {
+                    if (paymentMethod === "Campuran") {
+                      setSplitRefNo(e.target.value);
+                    } else {
+                      setQrisRefNo(e.target.value);
+                    }
+                  }}
+                  placeholder="Contoh: RRN-9921 / 4 digit akhir transaksi"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 font-mono text-xs outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {/* Tombol Aksi */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleCloseQrisModal}
+                  className="flex-1 py-2.5 text-xs font-semibold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmQrisPayment}
+                  className="flex-1 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-950/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Konfirmasi Diterima</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

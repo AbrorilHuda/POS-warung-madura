@@ -20,6 +20,7 @@ export async function getCustomersSummary(search?: string, activeOnly = true): P
       name,
       phone,
       address,
+      customer_group AS customerGroup,
       credit_limit AS creditLimit,
       is_active AS isActive,
       total_debt AS totalDebt,
@@ -55,6 +56,7 @@ export async function getCustomersSummary(search?: string, activeOnly = true): P
       name: r.name,
       phone: r.phone || undefined,
       address: r.address || undefined,
+      customerGroup: (r.customerGroup as any) || "umum",
       creditLimit,
       isActive: Boolean(r.isActive),
       totalDebt,
@@ -78,6 +80,7 @@ export async function getCustomerById(id: string): Promise<CustomerSummary | nul
       name,
       phone,
       address,
+      customer_group AS customerGroup,
       credit_limit AS creditLimit,
       is_active AS isActive,
       total_debt AS totalDebt,
@@ -99,6 +102,7 @@ export async function getCustomerById(id: string): Promise<CustomerSummary | nul
     name: r.name,
     phone: r.phone || undefined,
     address: r.address || undefined,
+    customerGroup: (r.customerGroup as any) || "umum",
     creditLimit,
     isActive: Boolean(r.isActive),
     totalDebt,
@@ -111,12 +115,13 @@ export async function getCustomerById(id: string): Promise<CustomerSummary | nul
 }
 
 /**
- * Membuat data master pelanggan baru (PRD F1.1)
+ * Membuat data master pelanggan baru (PRD F1.1 & F3.3)
  */
 export async function createCustomer(input: {
   name: string;
   phone?: string;
   address?: string;
+  customerGroup?: 'umum' | 'langganan' | 'reseller';
   creditLimit?: number;
   notes?: string;
 }): Promise<Customer> {
@@ -125,6 +130,7 @@ export async function createCustomer(input: {
   const name = input.name.trim();
   const phone = input.phone?.trim() || null;
   const address = input.address?.trim() || null;
+  const customerGroup = input.customerGroup || "umum";
   const creditLimit = Math.max(0, Number(input.creditLimit) || 0);
   const notes = input.notes?.trim() || null;
 
@@ -133,15 +139,16 @@ export async function createCustomer(input: {
   }
 
   await query(`
-    INSERT INTO customers (id, name, phone, address, credit_limit, notes, is_active)
-    VALUES (?, ?, ?, ?, ?, ?, TRUE)
-  `, [id, name, phone, address, creditLimit, notes]);
+    INSERT INTO customers (id, name, phone, address, customer_group, credit_limit, notes, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
+  `, [id, name, phone, address, customerGroup, creditLimit, notes]);
 
   return {
     id,
     name,
     phone: phone || undefined,
     address: address || undefined,
+    customerGroup,
     creditLimit,
     isActive: true,
     notes: notes || undefined,
@@ -158,6 +165,7 @@ export async function updateCustomer(
     name?: string;
     phone?: string;
     address?: string;
+    customerGroup?: 'umum' | 'langganan' | 'reseller';
     creditLimit?: number;
     isActive?: boolean;
     notes?: string;
@@ -179,6 +187,10 @@ export async function updateCustomer(
   if (input.address !== undefined) {
     updates.push("address = ?");
     params.push(input.address.trim() || null);
+  }
+  if (input.customerGroup !== undefined) {
+    updates.push("customer_group = ?");
+    params.push(input.customerGroup || "umum");
   }
   if (input.creditLimit !== undefined) {
     updates.push("credit_limit = ?");

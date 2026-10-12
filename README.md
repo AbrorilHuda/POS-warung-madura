@@ -2,6 +2,12 @@
 
 Aplikasi Point of Sale (POS) modern khusus operasional warung madura dan retail minimarket, dirancang untuk berjalan secara **offline-first** di laptop/PC kasir menggunakan **Electron Desktop** dengan database **MySQL Portable terisolasi**, serta terintegrasi dengan **Layanan Struk Digital Cloud (Invoice Publik)** dan **Scanner Barcode Nirkabel Kamera HP**.
 
+> [!WARNING]
+> 🚧 **Status Rilis: Early Access (Beta)**  
+> Aplikasi POS Warung Madura saat ini masih berada dalam tahap **pengembangan aktif (Early Access / Beta)** dan performa maupun beberapa fitur tertentu **masih belum sepenuhnya optimal**. Kami sangat menyarankan pengguna untuk melakukan pencadangan data (*backup*) secara berkala.
+> 
+> 💻 **Platform Didukung Saat Ini:** Dioptimalkan khusus untuk **Desktop Windows (Windows 10 / Windows 11 64-bit)** menggunakan Electron Desktop dan MySQL Portable mandiri. Dukungan untuk sistem operasi lain (Linux & macOS) sedang direncanakan — *kontribusi Anda sangat dinantikan!*
+
 > 📦 **Download Installer Aplikasi Windows (.exe):**  
 > Dapatkan file installer resmi siap pakai langsung tanpa perlu setup source code di:  
 > 👉 **[Download Rilis Terbaru di GitHub Releases](https://github.com/AbrorilHuda/POS-warung-madura/releases)**
@@ -27,11 +33,24 @@ POS-warung-madura/
 
 ## ⚡ Fitur Utama
 
-- 💻 **Desktop Standalone (Electron)**: Membungkus aplikasi web React Router v8 menjadi aplikasi desktop Windows native (.exe).
+- 💻 **Desktop Standalone (Windows .exe)**: Aplikasi desktop native Windows dibungkus Electron dengan zero-dependency runtime.
 - 🗄️ **Zero-Config Portable MySQL**: Menyalakan dan menginisialisasi MySQL lokal secara otomatis di port terisolasi `3307` tanpa perlu menginstal XAMPP/Laragon.
-- 📱 **Scanner Barcode Nirkabel via Kamera HP (F12)**: Mengubah smartphone kasir menjadi barcode scanner nirkabel menggunakan WebSocket aman (`wss://`) dan HTTPS dengan sertifikat SSL self-signed otomatis (Secure Context).
-- 🔄 **Antrian Sinkronisasi Cerdas (Queue Sync)**: Transaksi kasir tetap tersimpan aman di database lokal MySQL jika offline, dan otomatis tersinkronisasi ke cloud begitu internet terhubung.
-- 🧾 **Struk Digital & Retensi 12 Jam**: Pelanggan dapat melihat nota online lewat QR code; struk otomatis dihapus dari cloud dalam 12 jam untuk keamanan dan efisiensi penyimpanan.
+- 📱 **Scanner Barcode Kamera HP Nirkabel (F12)**: Mengubah smartphone kasir menjadi scanner barcode nirkabel via WebSocket aman (`wss://`) dan HTTPS SSL self-signed.
+- 🏷️ **Multi-Satuan & Harga Bertingkat / Reseller (F3)**: Menjual eceran/batang, bungkus, slop, hingga dus kartonan dengan harga grosir bertingkat otomatis.
+- 📦 **Manajemen Stok Lanjutan & FEFO (F7)**:
+  - Alert stok minimum per produk.
+  - Tanggal kedaluwarsa berbasis batch dengan algoritma **First Expired, First Out (FEFO)** dan status H-0 (Expired), H-7, H-30.
+  - Stok opname fisik dengan scanner barcode, perhitungan selisih kuantiti, dan selisih nilai finansial rupiah (HPP).
+  - Penyesuaian stok manual dengan alasan wajib (rusak, hilang, kedaluwarsa, konsumsi sendiri).
+  - Rekomendasi kulakan cerdas berdasarkan kecepatan penjualan 30 hari + ekspor daftar belanja ke WhatsApp.
+  - Kartu stok produk dengan saldo berjalan (*running balance*).
+- 👥 **Buku Kasbon & Pelanggan (F1)**: Pencatatan limit kredit, jatuh tempo, mutasi kasbon, dan pengingat WhatsApp 1-klik.
+- 📊 **Laporan Finansial & Omzet (F2)**: Laba kotor riil berdasarkan HPP, margin produk, ringkasan kas masuk/keluar, dan export laporan.
+- 💳 **Pembayaran Non-Tunai & QRIS Toko (F4)**: Modal QRIS Statis standee, split payment (tunai + QRIS), dan layar display pembeli (*Customer Display*) eksternal sinkron realtime.
+- 🛡️ **Shift Kasir & Multi-User (F5)**: Login PIN Kasir & Pemilik, serah terima shift kas, rekapitulasi selisih kas fisik, dan jejak rekam audit log.
+- 🔄 **Retur Penjualan & Void Nota (F6)**: Pembatalan nota salah atau pengembalian barang cacat dengan persetujuan PIN Pemilik.
+- 🔄 **Antrian Sinkronisasi Cerdas (Queue Sync)**: Transaksi kasir tetap aman di MySQL lokal saat offline dan otomatis sinkron ke cloud saat internet tersedia.
+- 🧾 **Struk Digital & Retensi 12 Jam**: Pelanggan dapat melihat nota online lewat QR code; struk otomatis terhapus dari cloud dalam 12 jam.
 
 ---
 
@@ -204,14 +223,74 @@ MySQL portable diatur ke port `3307` agar tidak bentrok dengan Laragon/XAMPP (po
 Stop-Process -Name mysqld -Force
 ```
 
-### 2. Bagaimana cara mereset database lokal ke kondisi awal?
-Hapus seluruh file di dalam folder `pos_warung_madura/resources/mysql/data/` (jangan hapus foldernya, biarkan kosong). Saat aplikasi dijalankan kembali, Electron akan menginisialisasi ulang database dan mengeksekusi skema awal secara otomatis.
+### 2. Bagaimana cara mereset atau me-refresh database lokal ke kondisi awal?
+Gunakan script otomatis yang telah disediakan di folder `pos_warung_madura`:
+- **Refresh & Isi Ulang Data Warung Lengkap (Default)**:
+  ```bash
+  cd pos_warung_madura
+  npm run db:refresh
+  ```
+  *Mereset database dan mengisi ulang 10 produk warung Madura, multi-satuan, harga bertingkat grosir, batch FEFO, pelanggan kasbon, serta akun kasir/pemilik.*
+- **Refresh Total Bersih TANPA SEED (Kosong Siap Input Barang Riil)**:
+  ```bash
+  npm run db:clean
+  # atau: node scripts/refresh-db.mjs --no-seed
+  ```
+  *Mereset seluruh data produk dan transaksi menjadi KOSONG (0 data). Tabel dan akun login tetap dibuat bersih siap untuk operasional toko nyata Anda.*
+- **Hard Reset Total (Drop & Rebuild Database)**:
+  ```bash
+  npm run db:reset-hard
+  # atau kosong tanpa seed: npm run db:clean-hard
+  ```
+- **Hanya Bersihkan Riwayat Transaksi (Pertahankan Master Barang)**:
+  ```bash
+  node scripts/refresh-db.mjs --clean-transactions
+  ```
+- **Reset Manual Folder Data**:
+  Hapus seluruh file di dalam folder `pos_warung_madura/resources/mysql/data/` (jangan hapus foldernya, biarkan kosong). Saat aplikasi dijalankan kembali, Electron akan menginisialisasi ulang database dan mengeksekusi skema awal secara otomatis.
 
 ### 3. Di mana lokasi data database dan sertifikat saat aplikasi terpasang di client?
 Pada mode produksi, data disimpan di direktori data aplikasi Windows (`%APPDATA%`):
 - Database MySQL: `%APPDATA%\pos_warung_madura\mysql-data\`
 - Sertifikat SSL: `%APPDATA%\pos_warung_madura\certs\`
 Lokasi ini aman dari pembatasan hak akses (*permission*) Windows dan tidak akan terhapus saat pembaruan aplikasi.
+
+---
+
+## 🤝 Kontribusi & Menuju Cross-Platform (Mari Berkontribusi!)
+
+Saat ini, POS Warung Madura baru dioptimalkan untuk sistem operasi **Desktop Windows (.exe)** karena penggunaan binary bundle MySQL Portable internal Windows (`mysqld.exe`).
+
+Kami memiliki visi agar sistem kasir modern open source ini dapat dinikmati oleh seluruh pelaku UMKM dan warung di berbagai perangkat tanpa hambatan. Oleh karena itu, **kami sangat mengundang dan menyambut kontribusi dari komunitas pengembang** untuk mewujudkan dukungan **Cross-Platform**:
+
+### 🎯 Roadmap Cross-Platform yang Diharapkan:
+- 🐧 **Dukungan Linux (Ubuntu / Debian / Arch / Fedora)**:
+  - Pembuatan script build installer `AppImage` / `.deb` / `.rpm`.
+  - Wrapper deteksi dan inisialisasi service MariaDB / MySQL native di Linux.
+- 🍏 **Dukungan macOS (Apple Silicon M-Series & Intel)**:
+  - Konfigurasi packaging `.dmg` via electron-builder.
+  - Setup MySQL Portable / Homebrew service integration untuk macOS.
+- 🗄️ **Abstraksi Database Alternatif (SQLite / PGLite)**:
+  - Eksplorasi driver database *embedded* zero-config tanpa daemon terpisah agar dapat berjalan langsung di OS apa pun secara instan.
+- 📱 **Web Standalone / PWA Kasir**:
+  - Dukungan mode web kasir murni yang bisa diakses langsung dari browser tablet (Android / iPad / Chromebook) tanpa harus membuka Electron.
+
+### 💡 Cara Berkontribusi:
+1. **Fork** repositori ini ke akun GitHub Anda.
+2. Buat branch fitur atau perbaikan baru:
+   ```bash
+   git checkout -b feature/dukungan-linux
+   ```
+3. Lakukan commit perubahan Anda dengan pesan yang jelas:
+   ```bash
+   git commit -m "feat: tambahkan skrip build dan konfigurasi electron untuk Linux"
+   ```
+4. Push branch ke repository fork Anda:
+   ```bash
+   git push origin feature/dukungan-linux
+   ```
+5. Buka **Pull Request (PR)** di repositori utama dan jelaskan perubahan yang Anda buat.
+6. Anda juga dapat membuka **[Issues](https://github.com/AbrorilHuda/POS-warung-madura/issues)** untuk melaporkan bug, mendiskusikan arsitektur, atau mengusulkan ide fitur baru!
 
 ---
 

@@ -21,7 +21,9 @@ interface KulakanProps {
     unit: ProductUnit,
     unitQty: number,
     costPrice: number,
-    supplier: string
+    supplier: string,
+    batchNo?: string,
+    expiryDate?: string | null
   ) => void;
   quickScanTriggerBarcode?: string | null;
   onClearQuickScanTrigger?: () => void;
@@ -55,6 +57,9 @@ export const Kulakan: React.FC<KulakanProps> = ({
   const [unitQty, setUnitQty] = useState<number>(1);
   const [costPrice, setCostPrice] = useState<number>(0);
   const [supplier, setSupplier] = useState<string>("Agen Grosir Sembako");
+  const [batchNo, setBatchNo] = useState<string>("");
+  const [expiryDate, setExpiryDate] = useState<string>("");
+  const [hasExpiry, setHasExpiry] = useState<boolean>(false);
   const [barcodeInput, setBarcodeInput] = useState<string>("");
   const [notification, setNotification] = useState<string>("");
   const [scanFeedback, setScanFeedback] = useState<string>("");
@@ -141,7 +146,15 @@ export const Kulakan: React.FC<KulakanProps> = ({
     if (e) e.preventDefault();
     if (!currentProduct || !activeUnit || unitQty <= 0) return;
 
-    onAddStockMovement(currentProduct.id, activeUnit, unitQty, costPrice, supplier);
+    onAddStockMovement(
+      currentProduct.id,
+      activeUnit,
+      unitQty,
+      costPrice,
+      supplier,
+      batchNo.trim() || undefined,
+      hasExpiry && expiryDate ? expiryDate : null
+    );
 
     const totalAdded = unitQty * activeUnit.conversionRatio;
     setNotification(
@@ -149,6 +162,8 @@ export const Kulakan: React.FC<KulakanProps> = ({
     );
     setTimeout(() => setNotification(""), 4500);
     setUnitQty(1);
+    setBatchNo("");
+    setExpiryDate("");
   };
 
   // Shortcut keyboard Ctrl+Enter
@@ -161,7 +176,7 @@ export const Kulakan: React.FC<KulakanProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentProduct, activeUnit, unitQty, costPrice, supplier]);
+  }, [currentProduct, activeUnit, unitQty, costPrice, supplier, batchNo, expiryDate, hasExpiry]);
 
   const totalCost = unitQty * costPrice;
   const convertedBaseUnitCount = unitQty * (activeUnit ? activeUnit.conversionRatio : 1);
@@ -450,6 +465,61 @@ export const Kulakan: React.FC<KulakanProps> = ({
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Batch & Tanggal Kedaluwarsa (PRD F7.2 FEFO) */}
+            <div className="p-3.5 rounded-2xl bg-amber-50/50 border border-amber-200/80 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Informasi Batch & Kedaluwarsa (FEFO)</span>
+                </span>
+                <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-amber-900 select-none">
+                  <input
+                    type="checkbox"
+                    checked={hasExpiry}
+                    onChange={(e) => setHasExpiry(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                  />
+                  <span>Ada Expired Date</span>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-amber-800 block mb-0.5">
+                    No. Batch (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={batchNo}
+                    onChange={(e) => setBatchNo(e.target.value)}
+                    placeholder="Auto generated jika kosong"
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-amber-200 text-xs text-slate-800 font-mono placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-semibold text-amber-800 block mb-0.5">
+                    Tanggal Kedaluwarsa (Exp Date)
+                  </label>
+                  <input
+                    type="date"
+                    disabled={!hasExpiry}
+                    value={expiryDate}
+                    onChange={(e) => setExpiryDate(e.target.value)}
+                    className={`w-full px-2.5 py-1.5 rounded-xl border text-xs font-mono transition focus:outline-none ${
+                      hasExpiry
+                        ? "bg-white border-amber-200 text-slate-800 focus:ring-1 focus:ring-amber-500"
+                        : "bg-slate-100/70 border-slate-200 text-slate-400 cursor-not-allowed"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <p className="text-[10px] text-amber-700/90 leading-tight">
+                *Penjualan kasir otomatis memotong batch terdekat kedaluwarsa lebih dahulu (First Expired First Out).
+              </p>
             </div>
 
             {/* Ringkasan Konversi & Total Modal */}

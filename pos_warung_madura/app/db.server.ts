@@ -105,7 +105,20 @@ export async function ensureDatabaseSchema(): Promise<void> {
       ) ENGINE=InnoDB;
     `);
 
-    // 4. View saldo utang pelanggan (PRD F1.4)
+    // 3b. Pastikan kolom customer_group ada di customers (PRD F3.3)
+    try {
+      const [cgCols] = await pool.query<RowDataPacket[]>(
+        `SHOW COLUMNS FROM customers LIKE 'customer_group'`
+      );
+      if (cgCols.length === 0) {
+        await pool.query(`
+          ALTER TABLE customers 
+          ADD COLUMN customer_group VARCHAR(50) DEFAULT 'umum' AFTER credit_limit;
+        `);
+      }
+    } catch {}
+
+    // 4. View saldo utang pelanggan (PRD F1.4 & F3.3)
     await pool.query(`
       CREATE OR REPLACE VIEW v_customer_receivables_summary AS
       SELECT 
@@ -113,6 +126,7 @@ export async function ensureDatabaseSchema(): Promise<void> {
         c.name,
         c.phone,
         c.address,
+        c.customer_group,
         c.credit_limit,
         c.is_active,
         COALESCE(SUM(CASE WHEN r.status IN ('open', 'partial') THEN (r.amount - r.paid_amount) ELSE 0 END), 0) AS total_debt,
@@ -121,7 +135,7 @@ export async function ensureDatabaseSchema(): Promise<void> {
         MAX(r.created_at) AS last_receivable_at
       FROM customers c
       LEFT JOIN receivables r ON c.id = r.customer_id
-      GROUP BY c.id, c.name, c.phone, c.address, c.credit_limit, c.is_active;
+      GROUP BY c.id, c.name, c.phone, c.address, c.customer_group, c.credit_limit, c.is_active;
     `);
 
     // 4b. View stok terkini produk dari ledger (PRD F2)
@@ -309,13 +323,151 @@ export async function ensureDatabaseSchema(): Promise<void> {
       `);
     }
 
-    // 14. Pengaturan default
+    // 14. Tabel product_prices (PRD F3: Harga Bertingkat / Grosir & Reseller)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS product_prices (
+        id VARCHAR(36) PRIMARY KEY,
+        product_id VARCHAR(36) NOT NULL,
+        unit_id VARCHAR(36) NOT NULL,
+        tier_name VARCHAR(100) NOT NULL,
+        min_qty DECIMAL(12, 4) NOT NULL DEFAULT 1.0000,
+        price DECIMAL(14, 2) NOT NULL,
+        customer_group VARCHAR(50) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_pp_product (product_id),
+        INDEX idx_pp_unit (unit_id),
+        CONSTRAINT fk_pp_product
+          FOREIGN KEY (product_id) REFERENCES products(id)
+          ON DELETE CASCADE,
+        CONSTRAINT fk_pp_unit
+          FOREIGN KEY (unit_id) REFERENCES product_units(id)
+          ON DELETE CASCADE
+      ) ENGINE=InnoDB;
+    `);
+
+    // 15. Kolom applied_tier_name di sale_items jika belum ada
+    try {
+      const [atnCols] = await pool.query<RowDataPacket[]>(
+        "SHOW COLUMNS FROM sale_items LIKE 'applied_tier_name'"
+      );
+      if (atnCols.length === 0) {
+        await pool.query(`
+          ALTER TABLE sale_items
+          ADD COLUMN applied_tier_name VARCHAR(100) NULL AFTER subtotal;
+        `);
+      }
+    } catch {}
+
+    // 16. Pengaturan default
     await pool.query(`
       INSERT INTO store_settings (setting_key, setting_value) VALUES
         ('owner_pin', '1234'),
         ('kasbon_due_days', '14')
       ON DUPLICATE KEY UPDATE setting_value = setting_value;
     `);
+
+    // 17. Bersihkan barcode pada produk yang sudah dihapus/dinonaktifkan (is_active = FALSE)
+    // agar barcode tidak memicu ER_DUP_ENTRY jika toko mendaftarkan ulang barang tersebut
+    try {
+      await pool.query(`
+        UPDATE product_units pu
+        JOIN products p ON pu.product_id = p.id
+        SET pu.barcode = NULL
+        WHERE p.is_active = FALSE AND pu.barcode IS NOT NULL;
+      `);
+    } catch {}
+
+    // 18. Tabel stock_batches (PRD F7.2 Tanggal Kedaluwarsa & FEFO)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS stock_batches (
+        id VARCHAR(36) PRIMARY KEY,
+        product_id VARCHAR(36) NOT NULL,
+        batch_no VARCHAR(100) NOT NULL,
+        qty_base DECIMAL(12, 4) NOT NULL DEFAULT 0,
+        initial_qty_base DECIMAL(12, 4) NOT NULL DEFAULT 0,
+        cost_price DECIMAL(15, 2) NOT NULL DEFAULT 0,
+        expiry_date DATE NULL,
+        received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        notes TEXT NULL,
+        INDEX idx_stock_batches_product (product_id),
+        INDEX idx_stock_batches_expiry (expiry_date),
+        CONSTRAINT fk_sb_product
+          FOREIGN KEY (product_id) REFERENCES products(id)
+          ON DELETE CASCADE
+      ) ENGINE=InnoDB;
+    `);
+
+    // 19. Tambahkan kolom batch_id ke stock_movements jika belum ada
+    try {
+      const [colsBatch] = await pool.query<RowDataPacket[]>(
+        "SHOW COLUMNS FROM stock_movements LIKE 'batch_id'"
+      );
+      if (colsBatch.length === 0) {
+        await pool.query(
+          "ALTER TABLE stock_movements ADD COLUMN batch_id VARCHAR(36) NULL AFTER reference_id;"
+        );
+      }
+    } catch {}
+
+    // 20. Tambahkan kolom category_filter dan total_financial_diff ke stock_opnames jika belum ada
+    try {
+      const [colsOpn] = await pool.query<RowDataPacket[]>(
+        "SHOW COLUMNS FROM stock_opnames LIKE 'category_filter'"
+      );
+      if (colsOpn.length === 0) {
+        await pool.query(`
+          ALTER TABLE stock_opnames 
+          ADD COLUMN category_filter VARCHAR(100) NULL AFTER status,
+          ADD COLUMN total_financial_diff DECIMAL(15, 2) NOT NULL DEFAULT 0 AFTER total_discrepancy_items;
+        `);
+      }
+    } catch {}
+
+    // 21. Tambahkan kolom cost_price dan financial_diff ke stock_opname_items jika belum ada
+    try {
+      const [colsOpnItem] = await pool.query<RowDataPacket[]>(
+        "SHOW COLUMNS FROM stock_opname_items LIKE 'cost_price'"
+      );
+      if (colsOpnItem.length === 0) {
+        await pool.query(`
+          ALTER TABLE stock_opname_items 
+          ADD COLUMN cost_price DECIMAL(15, 2) NOT NULL DEFAULT 0 AFTER difference,
+          ADD COLUMN financial_diff DECIMAL(15, 2) NOT NULL DEFAULT 0 AFTER cost_price;
+        `);
+      }
+    } catch {}
+
+    // 22. Inisialisasi batch awal untuk produk yang sudah ada stoknya jika tabel batch masih kosong
+    try {
+      const [batchCount] = await pool.query<RowDataPacket[]>(
+        "SELECT COUNT(*) as cnt FROM stock_batches"
+      );
+      if (batchCount[0]?.cnt === 0) {
+        // Ambil produk dengan stok riil > 0 dari view
+        const [prods] = await pool.query<RowDataPacket[]>(`
+          SELECT 
+            p.id, 
+            v.current_stock_base_unit, 
+            COALESCE(pu.cost_price, 0) as cost_price
+          FROM products p
+          JOIN v_product_current_stock v ON p.id = v.product_id
+          LEFT JOIN product_units pu ON p.id = pu.product_id AND pu.is_base_unit = TRUE
+          WHERE p.is_active = TRUE AND v.current_stock_base_unit > 0
+        `);
+
+        for (const row of prods) {
+          const batchId = `sb-init-${row.id.slice(-8)}`;
+          await pool.query(`
+            INSERT INTO stock_batches (
+              id, product_id, batch_no, qty_base, initial_qty_base, cost_price, expiry_date, notes
+            ) VALUES (?, ?, 'BATCH-AWAL', ?, ?, ?, NULL, 'Batch Inisialisasi Stok Sistem')
+          `, [batchId, row.id, row.current_stock_base_unit, row.current_stock_base_unit, row.cost_price]);
+        }
+      }
+    } catch (e: any) {
+      console.warn("[Init stock batches warning]:", e.message);
+    }
 
     isSchemaInitialized = true;
   } catch (err: any) {

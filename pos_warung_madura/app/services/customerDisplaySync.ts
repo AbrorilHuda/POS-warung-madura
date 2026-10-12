@@ -22,6 +22,16 @@ export type CustomerDisplayState =
       timestamp: number;
     }
   | {
+      type: "SHOW_QRIS";
+      amount: number;
+      invoiceCode: string;
+      storeName: string;
+      items?: DisplayCartItem[];
+      itemCount?: number;
+      customQrisImage?: string | null;
+      timestamp: number;
+    }
+  | {
       type: "SALE_COMPLETED";
       sale: Sale;
       timestamp: number;
@@ -122,6 +132,7 @@ export function listenCustomerDisplay(
     if (
       data.type === "STANDBY" ||
       data.type === "CART_UPDATE" ||
+      data.type === "SHOW_QRIS" ||
       data.type === "SALE_COMPLETED"
     ) {
       onEvent(data as CustomerDisplayState);
@@ -166,6 +177,12 @@ export function listenCustomerDisplay(
         parsed &&
         parsed.type === "CART_UPDATE" &&
         Date.now() - (parsed.timestamp || 0) < 5 * 60 * 1000
+      ) {
+        handleValidState(parsed);
+      } else if (
+        parsed &&
+        parsed.type === "SHOW_QRIS" &&
+        Date.now() - (parsed.timestamp || 0) < 10 * 60 * 1000
       ) {
         handleValidState(parsed);
       } else if (

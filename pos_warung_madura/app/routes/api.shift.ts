@@ -207,8 +207,9 @@ export async function action({ request }: ActionFunctionArgs) {
       case "initial_setup": {
         const res = await completeInitialSetup(body);
         const settings = await getShiftSecuritySettings();
-        return Response.json({ ok: true, ...res, settings });
+        return Response.json({ ...res, settings });
       }
+
 
       default:
         return Response.json({ ok: false, error: "Aksi tidak dikenali" }, { status: 400 });

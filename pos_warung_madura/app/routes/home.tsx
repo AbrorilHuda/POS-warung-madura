@@ -680,7 +680,9 @@ export default function Home() {
     unit: ProductUnit,
     unitQty: number,
     costPrice: number,
-    supplier: string
+    supplier: string,
+    batchNo?: string,
+    expiryDate?: string | null
   ) => {
     const qtyInBaseUnit = unitQty * unit.conversionRatio;
     const prod = products.find((p) => p.id === productId);
@@ -696,7 +698,7 @@ export default function Home() {
       unitNameUsed: unit.unitName,
       unitQtyUsed: unitQty,
       costPerUnit: costPrice,
-      notes: `Kulakan dari ${supplier}`,
+      notes: `Kulakan dari ${supplier}${batchNo ? ` (Batch: ${batchNo})` : ""}`,
       timestamp: new Date().toLocaleString("id-ID"),
     };
 
@@ -714,7 +716,7 @@ export default function Home() {
     formData.append("intent", "kulakan");
     formData.append(
       "kulakan",
-      JSON.stringify({ productId, unit, unitQty, costPrice, supplier })
+      JSON.stringify({ productId, unit, unitQty, costPrice, supplier, batchNo, expiryDate })
     );
     submit(formData, { method: "post", action: "/?index" });
   };

@@ -54,6 +54,7 @@ export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
   const [formName, setFormName] = useState("");
   const [formPhone, setFormPhone] = useState("");
   const [formAddress, setFormAddress] = useState("");
+  const [formCustomerGroup, setFormCustomerGroup] = useState<"umum" | "langganan" | "reseller">("umum");
   const [formCreditLimit, setFormCreditLimit] = useState<number>(0);
   const [formNotes, setFormNotes] = useState("");
   const [savingCustomer, setSavingCustomer] = useState(false);
@@ -117,6 +118,7 @@ export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
     setFormName("");
     setFormPhone("");
     setFormAddress("");
+    setFormCustomerGroup("umum");
     setFormCreditLimit(0);
     setFormNotes("");
     setIsCustomerModalOpen(true);
@@ -128,6 +130,7 @@ export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
     setFormName(c.name);
     setFormPhone(c.phone || "");
     setFormAddress(c.address || "");
+    setFormCustomerGroup(c.customerGroup || "umum");
     setFormCreditLimit(c.creditLimit || 0);
     setFormNotes(c.notes || "");
     setIsCustomerModalOpen(true);
@@ -149,6 +152,7 @@ export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
         name: formName.trim(),
         phone: formPhone.trim() || undefined,
         address: formAddress.trim() || undefined,
+        customerGroup: formCustomerGroup,
         creditLimit: formCreditLimit,
         notes: formNotes.trim() || undefined,
       };
@@ -590,9 +594,21 @@ export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
                         {getInitials(c.name)}
                       </div>
                       <div className="min-w-0">
-                        <h4 className="font-bold text-sm text-slate-900 tracking-tight truncate" title={c.name}>
-                          {c.name}
-                        </h4>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-bold text-sm text-slate-900 tracking-tight truncate" title={c.name}>
+                            {c.name}
+                          </h4>
+                          {c.customerGroup === "reseller" && (
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                              Reseller
+                            </span>
+                          )}
+                          {c.customerGroup === "langganan" && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                              Langganan
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono mt-0.5">
                           {c.phone ? (
                             <span className="flex items-center gap-1">
@@ -747,6 +763,16 @@ export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
                           {getInitials(c.name)}
                         </div>
                         <span className="font-bold text-slate-900 text-xs">{c.name}</span>
+                        {c.customerGroup === "reseller" && (
+                          <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                            Reseller
+                          </span>
+                        )}
+                        {c.customerGroup === "langganan" && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                            Langganan
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="py-3 px-4 font-mono text-slate-600">
@@ -891,6 +917,35 @@ export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
                       placeholder="Contoh: 100000"
                       className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono font-bold shadow-2xs"
                     />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 block">
+                    Grup Pelanggan / Kategori Harga (PRD F3.3)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: "umum", label: "Umum", desc: "Harga normal" },
+                      { id: "langganan", label: "Langganan", desc: "Pelanggan setia" },
+                      { id: "reseller", label: "Reseller", desc: "Warung mitra" },
+                    ].map((grp) => (
+                      <button
+                        key={grp.id}
+                        type="button"
+                        onClick={() => setFormCustomerGroup(grp.id as any)}
+                        className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                          formCustomerGroup === grp.id
+                            ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="font-bold text-xs">{grp.label}</div>
+                        <div className={`text-[10px] mt-0.5 ${formCustomerGroup === grp.id ? "text-slate-300" : "text-slate-400"}`}>
+                          {grp.desc}
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </div>
 

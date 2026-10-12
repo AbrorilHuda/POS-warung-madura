@@ -63,12 +63,13 @@ export async function action({ request }: ActionFunctionArgs) {
     const body = await request.json();
     const actionType = body.action || "create";
 
-    // 1. Tambah Pelanggan Baru (PRD F1.1)
+    // 1. Tambah Pelanggan Baru (PRD F1.1 & F3.3)
     if (actionType === "create") {
       const customer = await createCustomer({
         name: body.name,
         phone: body.phone,
         address: body.address,
+        customerGroup: body.customerGroup,
         creditLimit: body.creditLimit,
         notes: body.notes,
       });
@@ -84,6 +85,7 @@ export async function action({ request }: ActionFunctionArgs) {
         name: body.name,
         phone: body.phone,
         address: body.address,
+        customerGroup: body.customerGroup,
         creditLimit: body.creditLimit,
         isActive: body.isActive,
         notes: body.notes,

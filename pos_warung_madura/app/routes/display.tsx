@@ -192,7 +192,7 @@ export default function CustomerDisplay() {
         {/* --------------------------------------------------------------------- */}
         {/* KONDISI 1: BELUM ADA TRANSAKSI (STANDBY - DEFAULT STATE)              */}
         {/* --------------------------------------------------------------------- */}
-        {displayState.type !== "CART_UPDATE" && displayState.type !== "SALE_COMPLETED" && (
+        {displayState.type !== "CART_UPDATE" && displayState.type !== "SALE_COMPLETED" && displayState.type !== "SHOW_QRIS" && (
           <div className="max-w-xl w-full mx-auto text-center space-y-6 animate-in fade-in zoom-in-95 duration-200">
             {/* Minimalist Icon Badge */}
             <div className="w-20 h-20 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl flex items-center justify-center mx-auto text-amber-400">
@@ -432,6 +432,150 @@ export default function CustomerDisplay() {
             </div>
           </div>
         )}
+
+        {/* --------------------------------------------------------------------- */}
+        {/* KONDISI 4: TAMPILKAN QRIS UNTUK PEMBAYARAN (SHOW_QRIS)                */}
+        {/* --------------------------------------------------------------------- */}
+        {/* --------------------------------------------------------------------- */}
+        {/* KONDISI 4: TAMPILKAN QRIS UNTUK PEMBAYARAN (SHOW_QRIS)                */}
+        {/* --------------------------------------------------------------------- */}
+        {displayState.type === "SHOW_QRIS" && (() => {
+          const effectiveQrisImage =
+            displayState.customQrisImage ||
+            (typeof window !== "undefined"
+              ? localStorage.getItem("pos_qris_custom_image")
+              : null);
+
+          const hasItems = Boolean(displayState.items && displayState.items.length > 0);
+
+          return (
+            <div className={`w-full mx-auto animate-in zoom-in-95 duration-200 ${hasItems ? "grid grid-cols-1 lg:grid-cols-12 gap-6 items-start" : "max-w-md"}`}>
+              {/* Kolom Kiri: Rincian Belanja Jika Ada */}
+              {hasItems && (
+                <div className="lg:col-span-5 bg-slate-900/80 rounded-3xl p-5 border border-slate-800 shadow-xl space-y-3">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <Receipt className="w-4 h-4 text-amber-400" />
+                      <h3 className="font-bold text-sm text-white">
+                        Daftar Belanja
+                      </h3>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-mono font-semibold text-amber-300">
+                      {displayState.itemCount || displayState.items?.length || 0} Item
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-slate-800/60 max-h-[50vh] overflow-y-auto pr-1">
+                    {displayState.items?.map((it, idx) => (
+                      <div
+                        key={idx}
+                        className="py-2.5 flex items-center justify-between gap-3 text-sm"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-slate-100 text-sm truncate">
+                            {it.productName}
+                          </div>
+                          <div className="text-xs text-slate-400 font-mono mt-0.5">
+                            {it.qty} {it.unitName} &times; Rp {it.price.toLocaleString("id-ID")}
+                          </div>
+                        </div>
+                        <div className="text-right font-mono font-bold text-sm text-white shrink-0">
+                          Rp {it.subtotal.toLocaleString("id-ID")}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs text-slate-400">
+                    <span>Faktur:</span>
+                    <span className="font-mono font-bold text-slate-200">{displayState.invoiceCode}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Kolom Kanan / Utama: Kartu Resmi QRIS Standar Nasional */}
+              <div className={`${hasItems ? "lg:col-span-7" : "w-full"} bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden text-slate-800`}>
+                {/* Header Resmi QRIS Standar Nasional */}
+                <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white px-5 sm:px-6 py-4 flex items-center justify-between shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                      <QrCode className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="text-left">
+                      <div className="text-[11px] font-black uppercase tracking-widest text-red-100 leading-none">
+                        QRIS Standar Nasional
+                      </div>
+                      <h3 className="font-extrabold text-base sm:text-lg text-white tracking-wide mt-0.5">
+                        PEMBAYARAN QRIS TOKO
+                      </h3>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-white/20 text-white font-mono text-[11px] font-bold border border-white/30 shrink-0">
+                    {displayState.invoiceCode}
+                  </span>
+                </div>
+
+                {/* Konten Kartu QRIS */}
+                <div className="p-5 sm:p-6 space-y-4 text-center">
+                  {/* Nama Toko & Alamat */}
+                  <div className="pb-2 border-b border-slate-100">
+                    <h4 className="font-black text-lg sm:text-xl text-slate-900 tracking-tight uppercase">
+                      {displayState.storeName || storeConfig?.storeName || "WARUNG MADURA BERKAH"}
+                    </h4>
+                    <p className="text-xs text-slate-500 font-medium">
+                      {storeConfig?.storeAddress || storeConfig?.storeCity || "Toko Kelontong Madura 24 Jam"}
+                    </p>
+                  </div>
+
+                  {/* Nominal Tagihan */}
+                  <div className="bg-gradient-to-br from-slate-50 to-blue-50/50 border border-blue-200/80 rounded-2xl p-3.5">
+                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                      Total Yang Harus Dibayar
+                    </div>
+                    <div className="text-3xl sm:text-4xl font-black font-mono text-emerald-600 tracking-tight mt-0.5">
+                      Rp {displayState.amount.toLocaleString("id-ID")}
+                    </div>
+                  </div>
+
+                  {/* Area Barcode / Stiker QRIS */}
+                  <div className="p-4 bg-white rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center max-w-[280px] mx-auto">
+                    {effectiveQrisImage ? (
+                      <img
+                        src={effectiveQrisImage}
+                        alt="Stiker QRIS Toko"
+                        className="w-full max-h-[240px] object-contain rounded-xl"
+                      />
+                    ) : (
+                      <QRCodeSVG
+                        value={`${displayState.storeName || storeConfig?.storeName || "WARUNG MADURA"}|QRIS|INV:${displayState.invoiceCode}|TOTAL:${displayState.amount}`}
+                        size={210}
+                        level="M"
+                        includeMargin={false}
+                      />
+                    )}
+                  </div>
+
+                  {/* Instruksi Pelanggan */}
+                  <p className="text-xs text-slate-500 font-medium">
+                    Buka aplikasi m-Banking atau E-Wallet apa saja, lalu pindai (scan) QR di atas
+                  </p>
+
+                  {/* Badges Bank & E-Wallet */}
+                  <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1 border-t border-slate-100">
+                    {["BCA", "Mandiri", "BRI", "BNI", "GoPay", "OVO", "DANA", "ShopeePay"].map((bank) => (
+                      <span
+                        key={bank}
+                        className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[10px] border border-slate-200"
+                      >
+                        {bank}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </main>
 
       {/* ========================================================================= */}
@@ -451,7 +595,9 @@ export default function CustomerDisplay() {
                 ? "Standby (Menunggu Pembeli)"
                 : displayState.type === "CART_UPDATE"
                   ? "Sedang Transaksi"
-                  : "Nota Siap Di-Scan"}
+                  : displayState.type === "SHOW_QRIS"
+                    ? "Menunggu Scan QRIS"
+                    : "Nota Siap Di-Scan"}
             </strong>
           </span>
         </div>

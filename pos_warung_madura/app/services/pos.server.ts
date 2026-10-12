@@ -3,8 +3,22 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import { pool, query } from "../db.server";
-import type { RowDataPacket, ResultSetHeader } from "mysql2/promise";
-import type { Product, ProductUnit, Sale, StockMovement, StockOpnameItem } from "../types/pos";
+import type { RowDataPacket } from "mysql2/promise";
+import type {
+  Product,
+  ProductUnit,
+  ProductPriceTier,
+  CustomerGroupType,
+  Sale,
+  StockMovement,
+  StockOpnameItem,
+  StockBatch,
+  ExpiryStatus,
+  StockAdjustmentInput,
+  StockCardEntry,
+  ReorderRecommendation,
+  StockOpnameSessionRecord,
+} from "../types/pos";
 
 /**
  * Reload environment variables dari file .env secara realtime
@@ -22,7 +36,7 @@ export function reloadEnv() {
 
 
 /**
- * Mengambil semua data produk beserta multi-satuan dan stok realtime dari ledger
+ * Mengambil semua data produk beserta multi-satuan, harga bertingkat (grosir), dan stok realtime dari ledger
  */
 export async function getProductsFromDb(): Promise<Product[]> {
   // 1. Ambil data produk & stok realtime dari view
@@ -57,20 +71,54 @@ export async function getProductsFromDb(): Promise<Product[]> {
     ORDER BY conversion_ratio ASC
   `);
 
-  // 3. Mapping relasi produk ke units
+  // 3. Ambil data tingkat harga grosir / reseller (PRD F3)
+  let tierRows: RowDataPacket[] = [];
+  try {
+    tierRows = await query<RowDataPacket[]>(`
+      SELECT 
+        id,
+        product_id AS productId,
+        unit_id AS unitId,
+        tier_name AS tierName,
+        min_qty AS minQty,
+        price,
+        customer_group AS customerGroup
+      FROM product_prices
+      ORDER BY min_qty ASC
+    `);
+  } catch (err: any) {
+    console.warn("[getProductsFromDb] Belum ada tabel product_prices:", err.message);
+  }
+
+  // 4. Mapping relasi produk ke units dan priceTiers
   return productRows.map((p) => {
     const units: ProductUnit[] = unitRows
       .filter((u) => u.productId === p.id)
-      .map((u) => ({
-        id: u.id,
-        productId: u.productId,
-        unitName: u.unitName,
-        conversionRatio: Number(u.conversionRatio),
-        price: Number(u.price),
-        costPrice: u.costPrice ? Number(u.costPrice) : undefined,
-        barcode: u.barcode,
-        isBaseUnit: Boolean(u.isBaseUnit),
-      }));
+      .map((u) => {
+        const priceTiers: ProductPriceTier[] = tierRows
+          .filter((t) => t.unitId === u.id)
+          .map((t) => ({
+            id: t.id,
+            productId: t.productId,
+            unitId: t.unitId,
+            tierName: t.tierName,
+            minQty: Number(t.minQty),
+            price: Number(t.price),
+            customerGroup: t.customerGroup as CustomerGroupType || null,
+          }));
+
+        return {
+          id: u.id,
+          productId: u.productId,
+          unitName: u.unitName,
+          conversionRatio: Number(u.conversionRatio),
+          price: Number(u.price),
+          costPrice: u.costPrice ? Number(u.costPrice) : undefined,
+          barcode: u.barcode,
+          isBaseUnit: Boolean(u.isBaseUnit),
+          priceTiers,
+        };
+      });
 
     return {
       id: p.id,
@@ -83,6 +131,9 @@ export async function getProductsFromDb(): Promise<Product[]> {
     };
   });
 }
+
+export { calculateTieredPrice, getNextTierUpsell, validateTierList } from "./pricing";
+
 
 /**
  * Mencari produk dan satuan berdasarkan scan barcode (Lookup < 1ms via Index)
@@ -110,6 +161,27 @@ export async function findByBarcode(barcode: string): Promise<{ product: Product
   if (rows.length === 0) return null;
   const row = rows[0];
 
+  // Ambil tier harga untuk unit ini
+  let priceTiers: ProductPriceTier[] = [];
+  try {
+    const tierRows = await query<RowDataPacket[]>(`
+      SELECT id, product_id AS productId, unit_id AS unitId, tier_name AS tierName, min_qty AS minQty, price, customer_group AS customerGroup
+      FROM product_prices
+      WHERE unit_id = ?
+      ORDER BY min_qty ASC
+    `, [row.unit_id]);
+
+    priceTiers = tierRows.map((t) => ({
+      id: t.id,
+      productId: t.productId,
+      unitId: t.unitId,
+      tierName: t.tierName,
+      minQty: Number(t.minQty),
+      price: Number(t.price),
+      customerGroup: t.customerGroup as CustomerGroupType || null,
+    }));
+  } catch { }
+
   const unit: ProductUnit = {
     id: row.unit_id,
     productId: row.product_id,
@@ -119,6 +191,7 @@ export async function findByBarcode(barcode: string): Promise<{ product: Product
     costPrice: row.cost_price ? Number(row.cost_price) : undefined,
     barcode: row.barcode,
     isBaseUnit: Boolean(row.is_base_unit),
+    priceTiers,
   };
 
   const product: Product = {
@@ -228,8 +301,8 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
       await connection.execute(`
         INSERT INTO sale_items (
           id, sale_id, product_id, snapshot_product_name, snapshot_unit_name,
-          conversion_ratio, price, cost_price, quantity, subtotal
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          conversion_ratio, price, cost_price, quantity, subtotal, applied_tier_name
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         itemId,
         sale.id,
@@ -241,16 +314,51 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
         item.costPrice || null,
         item.qty,
         item.subtotal,
+        item.appliedTierName || null,
       ]);
 
       // Kurangi stok di ledger (nilai negatif di base unit)
-      const deductionInBaseUnit = -(item.qty * item.conversionRatio);
+      const baseUnitsNeeded = item.qty * item.conversionRatio;
+      const deductionInBaseUnit = -baseUnitsNeeded;
+
+      // PRD F7.2: FEFO Batch Deduction
+      // Ambil batch stok yang aktif (qty_base > 0) berurutan dari tanggal kedaluwarsa terdekat (FEFO)
+      // Produk dengan expiry_date terdekat diambil dulu, diikuti batch tanpa tanggal kedaluwarsa
+      let primaryBatchId: string | null = null;
+      try {
+        const [batchRows] = await connection.query<RowDataPacket[]>(`
+          SELECT id, batch_no, qty_base, expiry_date
+          FROM stock_batches
+          WHERE product_id = ? AND qty_base > 0
+          ORDER BY (expiry_date IS NULL) ASC, expiry_date ASC, received_at ASC
+          FOR UPDATE
+        `, [item.productId]);
+
+        let remainingToDeduct = baseUnitsNeeded;
+        for (const b of batchRows) {
+          if (remainingToDeduct <= 0) break;
+          const bQty = Number(b.qty_base);
+          const take = Math.min(bQty, remainingToDeduct);
+          if (!primaryBatchId) {
+            primaryBatchId = b.id;
+          }
+          await connection.execute(`
+            UPDATE stock_batches
+            SET qty_base = GREATEST(0, qty_base - ?)
+            WHERE id = ?
+          `, [take, b.id]);
+          remainingToDeduct -= take;
+        }
+      } catch (batchErr: any) {
+        console.warn("[FEFO deduction warning]:", batchErr.message);
+      }
+
       const movementId = `mov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       await connection.execute(`
         INSERT INTO stock_movements (
           id, product_id, type, quantity_in_base_unit, unit_name_used,
-          unit_qty_used, reference_type, reference_id, notes
-        ) VALUES (?, ?, 'out', ?, ?, ?, 'sale', ?, ?)
+          unit_qty_used, reference_type, reference_id, batch_id, notes
+        ) VALUES (?, ?, 'out', ?, ?, ?, 'sale', ?, ?, ?)
       `, [
         movementId,
         item.productId,
@@ -258,7 +366,8 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
         item.unitName,
         item.qty,
         sale.id,
-        `Penjualan ${sale.invoiceCode}`,
+        primaryBatchId,
+        `Penjualan ${sale.invoiceCode}${primaryBatchId ? ' (FEFO)' : ''}`,
       ]);
     }
 
@@ -279,7 +388,7 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
 }
 
 /**
- * Mencatat Kulakan Stok Masuk ke Ledger MySQL Lokal
+ * Mencatat Kulakan Stok Masuk ke Ledger MySQL Lokal & Batch FEFO
  */
 export async function createStockKulakan(params: {
   productId: string;
@@ -287,21 +396,44 @@ export async function createStockKulakan(params: {
   unitQty: number;
   costPrice: number;
   supplier: string;
+  batchNo?: string;
+  expiryDate?: string | null;
 }): Promise<void> {
-  const { productId, unit, unitQty, costPrice, supplier } = params;
+  const { productId, unit, unitQty, costPrice, supplier, batchNo, expiryDate } = params;
   const qtyInBaseUnit = unitQty * unit.conversionRatio;
   const movementId = `mov-in-${Date.now()}`;
+  const batchId = `sb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const cleanBatchNo = (batchNo && batchNo.trim())
+    ? batchNo.trim()
+    : `B-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    // 1. Simpan Mutasi Masuk
+    // 1. Simpan Batch Baru (PRD F7.2 FEFO)
+    const costPerBaseUnit = unit.conversionRatio > 0 ? costPrice / unit.conversionRatio : costPrice;
+    await connection.execute(`
+      INSERT INTO stock_batches (
+        id, product_id, batch_no, qty_base, initial_qty_base, cost_price, expiry_date, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      batchId,
+      productId,
+      cleanBatchNo,
+      qtyInBaseUnit,
+      qtyInBaseUnit,
+      costPerBaseUnit,
+      expiryDate || null,
+      `Kulakan dari ${supplier}`,
+    ]);
+
+    // 2. Simpan Mutasi Masuk
     await connection.execute(`
       INSERT INTO stock_movements (
         id, product_id, type, quantity_in_base_unit, unit_name_used,
-        unit_qty_used, cost_per_unit, reference_type, notes
-      ) VALUES (?, ?, 'in', ?, ?, ?, ?, 'purchase', ?)
+        unit_qty_used, cost_per_unit, reference_type, batch_id, notes
+      ) VALUES (?, ?, 'in', ?, ?, ?, ?, 'purchase', ?, ?)
     `, [
       movementId,
       productId,
@@ -309,10 +441,11 @@ export async function createStockKulakan(params: {
       unit.unitName,
       unitQty,
       costPrice,
-      `Kulakan dari ${supplier}`,
+      batchId,
+      `Kulakan dari ${supplier} (Batch: ${cleanBatchNo})`,
     ]);
 
-    // 2. Update referensi cost price di product_units
+    // 3. Update referensi cost price di product_units
     if (costPrice > 0 && unit?.id) {
       await connection.execute(`
         UPDATE product_units 
@@ -331,14 +464,42 @@ export async function createStockKulakan(params: {
 }
 
 /**
- * Menyimpan Rekonsiliasi Sesi Stok Opname Bulanan
+ * Menyimpan Rekonsiliasi Sesi Stok Opname Bulanan & Per Kategori (PRD F7.3)
  */
 export async function createStockOpnameAdjustment(
   sessionCode: string,
-  items: StockOpnameItem[]
+  items: StockOpnameItem[],
+  options?: {
+    categoryFilter?: string | null;
+    approvedBy?: string;
+    notes?: string;
+  }
 ): Promise<void> {
   const opnameId = `opn-${Date.now()}`;
   const totalDiffItems = items.filter((it) => it.difference !== 0);
+
+  // Ambil harga modal dasar untuk menghitung selisih finansial
+  const [costRows] = await pool.query<RowDataPacket[]>(`
+    SELECT product_id, cost_price 
+    FROM product_units 
+    WHERE is_base_unit = TRUE
+  `);
+  const costMap = new Map<string, number>();
+  for (const r of costRows) {
+    costMap.set(r.product_id, Number(r.cost_price || 0));
+  }
+
+  let totalFinancialDiff = 0;
+  const enrichedItems = items.map((it) => {
+    const unitCost = it.costPrice !== undefined ? it.costPrice : (costMap.get(it.productId) || 0);
+    const finDiff = it.difference * unitCost;
+    totalFinancialDiff += finDiff;
+    return {
+      ...it,
+      costPrice: unitCost,
+      financialDiff: finDiff,
+    };
+  });
 
   const connection = await pool.getConnection();
   try {
@@ -346,16 +507,29 @@ export async function createStockOpnameAdjustment(
 
     // 1. Header Opname
     await connection.execute(`
-      INSERT INTO stock_opnames (id, session_code, status, total_discrepancy_items, completed_at)
-      VALUES (?, ?, 'completed', ?, NOW())
-    `, [opnameId, sessionCode, totalDiffItems.length]);
+      INSERT INTO stock_opnames (
+        id, session_code, status, category_filter, 
+        total_discrepancy_items, total_financial_diff, notes, completed_at
+      )
+      VALUES (?, ?, 'completed', ?, ?, ?, ?, NOW())
+    `, [
+      opnameId,
+      sessionCode,
+      options?.categoryFilter || null,
+      totalDiffItems.length,
+      totalFinancialDiff,
+      options?.notes || null,
+    ]);
 
     // 2. Items & Mutasi Penyesuaian
-    for (const it of items) {
+    for (const it of enrichedItems) {
       const opnItemId = `opn-item-${Date.now()}-${it.productId}`;
       await connection.execute(`
-        INSERT INTO stock_opname_items (id, opname_id, product_id, system_stock, physical_stock, difference, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO stock_opname_items (
+          id, opname_id, product_id, system_stock, physical_stock, 
+          difference, cost_price, financial_diff, notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         opnItemId,
         opnameId,
@@ -363,6 +537,8 @@ export async function createStockOpnameAdjustment(
         it.systemStock,
         it.physicalStock,
         it.difference,
+        it.costPrice || 0,
+        it.financialDiff || 0,
         it.notes || null,
       ]);
 
@@ -383,8 +559,38 @@ export async function createStockOpnameAdjustment(
           opnameId,
           `Opname ${sessionCode}: ${it.notes || "Koreksi Fisik"}`,
         ]);
+
+        // Jika selisih negatif (stok kurang/hilang), potong batch terdekat
+        if (it.difference < 0) {
+          try {
+            const [bRows] = await connection.query<RowDataPacket[]>(`
+              SELECT id, qty_base FROM stock_batches
+              WHERE product_id = ? AND qty_base > 0
+              ORDER BY (expiry_date IS NULL) ASC, expiry_date ASC, received_at ASC
+              LIMIT 1
+            `, [it.productId]);
+            if (bRows.length > 0) {
+              await connection.execute(`
+                UPDATE stock_batches
+                SET qty_base = GREATEST(0, qty_base - ?)
+                WHERE id = ?
+              `, [Math.abs(it.difference), bRows[0].id]);
+            }
+          } catch { }
+        }
       }
     }
+
+    // 3. Catat di audit log
+    await connection.execute(`
+      INSERT INTO audit_logs (id, user_name, action, target_type, target_id, details)
+      VALUES (?, ?, 'STOCK_OPNAME_COMPLETED', 'stock_opname', ?, ?)
+    `, [
+      `aud-${Date.now()}`,
+      options?.approvedBy || "Pemilik",
+      opnameId,
+      `Sesi Opname ${sessionCode}: ${totalDiffItems.length} barang selisih, total nilai finansial: Rp ${Math.round(totalFinancialDiff).toLocaleString("id-ID")}`,
+    ]);
 
     await connection.commit();
   } catch (err) {
@@ -393,6 +599,362 @@ export async function createStockOpnameAdjustment(
   } finally {
     connection.release();
   }
+}
+
+/**
+ * Mengambil daftar Batch & Status Kedaluwarsa (PRD F7.2)
+ */
+export async function getStockBatches(productId?: string): Promise<StockBatch[]> {
+  const sql = `
+    SELECT 
+      sb.id,
+      sb.product_id AS productId,
+      p.name AS productName,
+      p.category,
+      p.base_unit AS baseUnit,
+      sb.batch_no AS batchNo,
+      sb.qty_base AS qtyBase,
+      sb.initial_qty_base AS initialQtyBase,
+      sb.cost_price AS costPrice,
+      DATE_FORMAT(sb.expiry_date, '%Y-%m-%d') AS expiryDate,
+      sb.received_at AS receivedAt,
+      sb.notes
+    FROM stock_batches sb
+    JOIN products p ON sb.product_id = p.id
+    WHERE p.is_active = TRUE ${productId ? "AND sb.product_id = ?" : ""}
+    ORDER BY (sb.expiry_date IS NULL) ASC, sb.expiry_date ASC, sb.received_at ASC
+  `;
+
+  const rows = await query<RowDataPacket[]>(sql, productId ? [productId] : []);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return rows.map((r) => {
+    let daysUntilExpiry: number | null = null;
+    let expiryStatus: ExpiryStatus = "safe";
+
+    if (r.expiryDate) {
+      const expDate = new Date(r.expiryDate);
+      expDate.setHours(0, 0, 0, 0);
+      daysUntilExpiry = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (daysUntilExpiry < 0) {
+        expiryStatus = "expired";
+      } else if (daysUntilExpiry <= 7) {
+        expiryStatus = "warning_7";
+      } else if (daysUntilExpiry <= 30) {
+        expiryStatus = "warning_30";
+      } else {
+        expiryStatus = "safe";
+      }
+    }
+
+    return {
+      id: r.id,
+      productId: r.productId,
+      productName: r.productName,
+      category: r.category,
+      baseUnit: r.baseUnit,
+      batchNo: r.batchNo,
+      qtyBase: Number(r.qtyBase),
+      initialQtyBase: Number(r.initialQtyBase),
+      costPrice: Number(r.costPrice),
+      expiryDate: r.expiryDate || null,
+      receivedAt: String(r.receivedAt),
+      notes: r.notes || null,
+      daysUntilExpiry,
+      expiryStatus,
+    };
+  });
+}
+
+/**
+ * Penyesuaian Stok Manual dengan Alasan Wajib & Audit Log (PRD F7.4)
+ */
+export async function createManualStockAdjustment(input: StockAdjustmentInput): Promise<void> {
+  const { productId, qtyDiff, reasonCategory, notes, batchId, approvedBy } = input;
+  if (!productId || qtyDiff === 0) {
+    throw new Error("Produk dan jumlah selisih tidak boleh kosong");
+  }
+
+  const [prodRows] = await pool.query<RowDataPacket[]>(
+    "SELECT id, name, base_unit FROM products WHERE id = ?",
+    [productId]
+  );
+  if (prodRows.length === 0) {
+    throw new Error("Produk tidak ditemukan");
+  }
+  const prod = prodRows[0];
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const movementId = `mov-adj-${Date.now()}`;
+    const reasonLabelMap: Record<string, string> = {
+      rusak: "Barang Rusak/Pecah",
+      hilang: "Barang Hilang",
+      kedaluwarsa: "Kedaluwarsa/Basi",
+      konsumsi_sendiri: "Konsumsi Pribadi/Toko",
+      koreksi: "Koreksi Stok Manual",
+    };
+    const formattedNotes = `[${reasonLabelMap[reasonCategory] || reasonCategory.toUpperCase()}] ${notes || ""}`.trim();
+
+    // 1. Simpan ke stock_movements
+    await connection.execute(`
+      INSERT INTO stock_movements (
+        id, product_id, type, quantity_in_base_unit, unit_name_used,
+        unit_qty_used, reference_type, batch_id, notes
+      ) VALUES (?, ?, 'adjustment', ?, ?, ?, 'adjustment', ?, ?)
+    `, [
+      movementId,
+      productId,
+      qtyDiff,
+      prod.base_unit,
+      Math.abs(qtyDiff),
+      batchId || null,
+      formattedNotes,
+    ]);
+
+    // 2. Potong / tambah batch jika batchId diberikan atau potong FEFO jika pengurangan
+    if (batchId) {
+      if (qtyDiff < 0) {
+        await connection.execute(`
+          UPDATE stock_batches
+          SET qty_base = GREATEST(0, qty_base - ?)
+          WHERE id = ?
+        `, [Math.abs(qtyDiff), batchId]);
+      } else {
+        await connection.execute(`
+          UPDATE stock_batches
+          SET qty_base = qty_base + ?
+          WHERE id = ?
+        `, [qtyDiff, batchId]);
+      }
+    } else if (qtyDiff < 0) {
+      // FEFO deduction dari batch aktif
+      const [bRows] = await connection.query<RowDataPacket[]>(`
+        SELECT id, qty_base FROM stock_batches
+        WHERE product_id = ? AND qty_base > 0
+        ORDER BY (expiry_date IS NULL) ASC, expiry_date ASC, received_at ASC
+        FOR UPDATE
+      `, [productId]);
+
+      let remaining = Math.abs(qtyDiff);
+      for (const b of bRows) {
+        if (remaining <= 0) break;
+        const take = Math.min(Number(b.qty_base), remaining);
+        await connection.execute(`
+          UPDATE stock_batches
+          SET qty_base = GREATEST(0, qty_base - ?)
+          WHERE id = ?
+        `, [take, b.id]);
+        remaining -= take;
+      }
+    }
+
+    // 3. Catat di audit_logs (Wajib PRD F7.4)
+    await connection.execute(`
+      INSERT INTO audit_logs (id, user_name, action, target_type, target_id, details)
+      VALUES (?, ?, 'STOCK_MANUAL_ADJUSTMENT', 'product', ?, ?)
+    `, [
+      `aud-${Date.now()}`,
+      approvedBy || "Pemilik",
+      productId,
+      JSON.stringify({
+        productName: prod.name,
+        qtyDiff,
+        reason: reasonCategory,
+        notes: notes || "",
+        batchId: batchId || null,
+      }),
+    ]);
+
+    await connection.commit();
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
+}
+
+/**
+ * Kartu Stok per Produk dengan Saldo Berjalan (PRD F7.6)
+ */
+export async function getStockCardHistory(productId: string, limit = 100): Promise<StockCardEntry[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(`
+    SELECT 
+      sm.id,
+      sm.created_at AS createdAt,
+      sm.type,
+      COALESCE(sm.reference_type, 'manual') AS refType,
+      sm.reference_id AS refId,
+      sm.quantity_in_base_unit AS qtyChange,
+      sm.unit_name_used AS unitNameUsed,
+      sm.unit_qty_used AS unitQtyUsed,
+      sm.cost_per_unit AS costPerUnit,
+      sm.notes,
+      sb.batch_no AS batchNo,
+      DATE_FORMAT(sb.expiry_date, '%Y-%m-%d') AS batchExpiry
+    FROM stock_movements sm
+    LEFT JOIN stock_batches sb ON sm.batch_id = sb.id
+    WHERE sm.product_id = ?
+    ORDER BY sm.created_at ASC, sm.id ASC
+  `, [productId]);
+
+  let runningBalance = 0;
+  const listWithBalance: StockCardEntry[] = [];
+
+  for (const r of rows) {
+    runningBalance += Number(r.qtyChange);
+    listWithBalance.push({
+      id: r.id,
+      date: new Date(r.createdAt).toLocaleString("id-ID"),
+      type: r.type,
+      refType: r.refType,
+      refId: r.refId || undefined,
+      qtyChange: Number(r.qtyChange),
+      unitNameUsed: r.unitNameUsed,
+      unitQtyUsed: Number(r.unitQtyUsed),
+      runningBalance: Number(runningBalance.toFixed(2)),
+      costPerUnit: r.costPerUnit ? Number(r.costPerUnit) : undefined,
+      notes: r.notes || "",
+      batchNo: r.batchNo || undefined,
+      batchExpiry: r.batchExpiry || undefined,
+    });
+  }
+
+  return listWithBalance.reverse().slice(0, limit);
+}
+
+/**
+ * Rekomendasi Kulakan Berdasarkan Kecepatan Jual 30 Hari & Lead Time (PRD F7.5)
+ */
+export async function getReorderRecommendations(): Promise<ReorderRecommendation[]> {
+  // 1. Ambil data produk aktif dan stok saat ini
+  const [products] = await pool.query<RowDataPacket[]>(`
+    SELECT 
+      p.id, 
+      p.name, 
+      p.category, 
+      p.base_unit AS baseUnit, 
+      COALESCE(p.min_stock_alert, 5) AS minStock,
+      COALESCE(v.current_stock_base_unit, 0) AS currentStock,
+      COALESCE(pu.cost_price, 0) AS lastCostPrice
+    FROM products p
+    LEFT JOIN v_product_current_stocks v ON p.id = v.product_id
+    LEFT JOIN product_units pu ON p.id = pu.product_id AND pu.is_base_unit = TRUE
+    WHERE p.is_active = TRUE
+  `);
+
+  // 2. Ambil akumulasi penjualan dalam 30 hari terakhir
+  const [salesRows] = await pool.query<RowDataPacket[]>(`
+    SELECT 
+      si.product_id,
+      COALESCE(SUM(si.quantity * si.conversion_ratio), 0) AS sold_30_days
+    FROM sale_items si
+    JOIN sales s ON si.sale_id = s.id
+    WHERE s.is_void = FALSE 
+      AND s.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+    GROUP BY si.product_id
+  `);
+
+  const salesMap = new Map<string, number>();
+  for (const r of salesRows) {
+    salesMap.set(r.product_id, Number(r.sold_30_days || 0));
+  }
+
+  const recommendations: ReorderRecommendation[] = products.map((p) => {
+    const sold30 = salesMap.get(p.id) || 0;
+    const avgDailySales = Number((sold30 / 30).toFixed(2));
+    const currentStock = Number(p.currentStock);
+    const minStock = Number(p.minStock);
+    const lastCostPrice = Number(p.lastCostPrice);
+
+    // Hitung sisa hari stok bertahan
+    let daysOfStockLeft = 999;
+    if (avgDailySales > 0) {
+      daysOfStockLeft = Number((currentStock / avgDailySales).toFixed(1));
+    } else if (currentStock <= 0) {
+      daysOfStockLeft = 0;
+    }
+
+    // Lead time target: 7 hari stok aman + minStock
+    const targetBuffer = Math.ceil(avgDailySales * 7);
+    let suggestedOrderQty = Math.max(0, Math.ceil(targetBuffer + minStock - currentStock));
+
+    // Jika stok habis atau di bawah minimum tetapi belum ada riwayat penjualan 30 hari
+    if (currentStock <= minStock && suggestedOrderQty === 0) {
+      suggestedOrderQty = minStock * 2;
+    }
+
+    // Tentukan tingkat urgensi
+    let urgency: "critical" | "warning" | "normal" = "normal";
+    if (currentStock <= 0 || daysOfStockLeft <= 2) {
+      urgency = "critical";
+    } else if (currentStock <= minStock || daysOfStockLeft <= 7) {
+      urgency = "warning";
+    }
+
+    return {
+      productId: p.id,
+      productName: p.name,
+      category: p.category,
+      baseUnit: p.baseUnit,
+      currentStock,
+      minStock,
+      avgDailySales,
+      daysOfStockLeft: daysOfStockLeft < 0 ? 0 : daysOfStockLeft,
+      suggestedOrderQty,
+      lastCostPrice,
+      estimatedTotalCost: suggestedOrderQty * lastCostPrice,
+      urgency,
+    };
+  });
+
+  // Urutkan: Kritis dulu, lalu Waspada, lalu Normal
+  const urgencyWeight = { critical: 0, warning: 1, normal: 2 };
+  return recommendations.sort((a, b) => {
+    if (urgencyWeight[a.urgency] !== urgencyWeight[b.urgency]) {
+      return urgencyWeight[a.urgency] - urgencyWeight[b.urgency];
+    }
+    return a.daysOfStockLeft - b.daysOfStockLeft;
+  });
+}
+
+/**
+ * Mengambil Riwayat Sesi Stok Opname (PRD F7.3)
+ */
+export async function getStockOpnameHistory(limit = 20): Promise<StockOpnameSessionRecord[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(`
+    SELECT 
+      id,
+      session_code AS sessionCode,
+      status,
+      category_filter AS categoryFilter,
+      total_discrepancy_items AS totalDiscrepancyItems,
+      total_financial_diff AS totalFinancialDiff,
+      notes,
+      created_at AS createdAt,
+      completed_at AS completedAt
+    FROM stock_opnames
+    ORDER BY created_at DESC
+    LIMIT ?
+  `, [limit]);
+
+  return rows.map((r) => ({
+    id: r.id,
+    sessionCode: r.sessionCode,
+    status: r.status,
+    categoryFilter: r.categoryFilter || null,
+    totalItems: 0,
+    totalDiscrepancyItems: Number(r.totalDiscrepancyItems || 0),
+    totalFinancialDiff: Number(r.totalFinancialDiff || 0),
+    notes: r.notes || null,
+    createdAt: new Date(r.createdAt).toLocaleString("id-ID"),
+    completedAt: r.completedAt ? new Date(r.completedAt).toLocaleString("id-ID") : null,
+  }));
 }
 
 /**
@@ -419,7 +981,7 @@ export async function getSalesFromDb(): Promise<Sale[]> {
       id, sale_id AS saleId, product_id AS productId,
       snapshot_product_name AS productName, snapshot_unit_name AS unitName,
       conversion_ratio AS conversionRatio, price, cost_price AS costPrice,
-      quantity AS qty, subtotal
+      quantity AS qty, subtotal, applied_tier_name AS appliedTierName
     FROM sale_items
   `);
 
@@ -446,6 +1008,7 @@ export async function getSalesFromDb(): Promise<Sale[]> {
         qty: Number(it.qty),
         subtotal: Number(it.subtotal),
         costPrice: it.costPrice ? Number(it.costPrice) : undefined,
+        appliedTierName: it.appliedTierName || undefined,
       })),
   }));
 }
@@ -501,8 +1064,34 @@ export async function createProductWithUnits(product: Product): Promise<void> {
       product.minStockAlert || 10,
     ]);
 
-    // 2. Insert units
+    // 2. Insert units & price tiers (PRD F3)
     for (const unit of product.units) {
+      const cleanBarcode = unit.barcode?.trim() || null;
+
+      if (cleanBarcode) {
+        // Bebaskan barcode jika sebelumnya menempel pada produk yang sudah dihapus/dinonaktifkan (is_active = FALSE)
+        const [inactiveRows] = await connection.execute<RowDataPacket[]>(`
+          SELECT pu.id, pu.product_id,
+                 (SELECT COUNT(*) FROM sale_items si WHERE si.product_id = p.id) AS sales_count
+          FROM product_units pu
+          JOIN products p ON pu.product_id = p.id
+          WHERE pu.barcode = ? AND p.is_active = FALSE
+        `, [cleanBarcode]);
+
+        if (inactiveRows && inactiveRows.length > 0) {
+          for (const row of inactiveRows) {
+            if (Number(row.sales_count) === 0) {
+              await connection.execute(`DELETE FROM stock_movements WHERE product_id = ?`, [row.product_id]);
+              await connection.execute(`DELETE FROM product_prices WHERE product_id = ?`, [row.product_id]);
+              await connection.execute(`DELETE FROM product_units WHERE product_id = ?`, [row.product_id]);
+              await connection.execute(`DELETE FROM products WHERE id = ?`, [row.product_id]);
+            } else {
+              await connection.execute(`UPDATE product_units SET barcode = NULL WHERE id = ?`, [row.id]);
+            }
+          }
+        }
+      }
+
       await connection.execute(`
         INSERT INTO product_units (
           id, product_id, unit_name, conversion_ratio, price, cost_price, barcode, is_base_unit
@@ -514,9 +1103,27 @@ export async function createProductWithUnits(product: Product): Promise<void> {
         unit.conversionRatio,
         unit.price,
         unit.costPrice || null,
-        unit.barcode?.trim() || null,
+        cleanBarcode,
         unit.isBaseUnit ? 1 : 0,
       ]);
+
+      if (unit.priceTiers && unit.priceTiers.length > 0) {
+        for (const tier of unit.priceTiers) {
+          const tierId = tier.id || `tier-${unit.id}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          await connection.execute(`
+            INSERT INTO product_prices (id, product_id, unit_id, tier_name, min_qty, price, customer_group)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `, [
+            tierId,
+            product.id,
+            unit.id,
+            tier.tierName.trim(),
+            Number(tier.minQty) || 1,
+            Number(tier.price) || 0,
+            tier.customerGroup || null,
+          ]);
+        }
+      }
     }
 
     // 3. Insert initial stock movement if any
@@ -1238,20 +1845,65 @@ export async function updateProductWithUnits(product: Product): Promise<void> {
     await connection.execute(`DELETE FROM product_units WHERE product_id = ?`, [product.id]);
 
     for (const unit of product.units) {
+      const cleanBarcode = unit.barcode?.trim() || null;
+
+      if (cleanBarcode) {
+        // Bebaskan barcode jika sebelumnya menempel pada produk lain yang sudah dihapus/dinonaktifkan (is_active = FALSE)
+        const [inactiveRows] = await connection.execute<RowDataPacket[]>(`
+          SELECT pu.id, pu.product_id,
+                 (SELECT COUNT(*) FROM sale_items si WHERE si.product_id = p.id) AS sales_count
+          FROM product_units pu
+          JOIN products p ON pu.product_id = p.id
+          WHERE pu.barcode = ? AND p.is_active = FALSE AND p.id != ?
+        `, [cleanBarcode, product.id]);
+
+        if (inactiveRows && inactiveRows.length > 0) {
+          for (const row of inactiveRows) {
+            if (Number(row.sales_count) === 0) {
+              await connection.execute(`DELETE FROM stock_movements WHERE product_id = ?`, [row.product_id]);
+              await connection.execute(`DELETE FROM product_prices WHERE product_id = ?`, [row.product_id]);
+              await connection.execute(`DELETE FROM product_units WHERE product_id = ?`, [row.product_id]);
+              await connection.execute(`DELETE FROM products WHERE id = ?`, [row.product_id]);
+            } else {
+              await connection.execute(`UPDATE product_units SET barcode = NULL WHERE id = ?`, [row.id]);
+            }
+          }
+        }
+      }
+
+      const unitId = unit.id || `unit-${product.id}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       await connection.execute(`
         INSERT INTO product_units (
           id, product_id, unit_name, conversion_ratio, price, cost_price, barcode, is_base_unit
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        unit.id || `unit-${product.id}-${Date.now()}-${Math.random()}`,
+        unitId,
         product.id,
         unit.unitName,
         unit.conversionRatio,
         unit.price,
         unit.costPrice || null,
-        unit.barcode?.trim() || null,
+        cleanBarcode,
         unit.isBaseUnit ? 1 : 0,
       ]);
+
+      if (unit.priceTiers && unit.priceTiers.length > 0) {
+        for (const tier of unit.priceTiers) {
+          const tierId = tier.id || `tier-${unitId}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          await connection.execute(`
+            INSERT INTO product_prices (id, product_id, unit_id, tier_name, min_qty, price, customer_group)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `, [
+            tierId,
+            product.id,
+            unitId,
+            tier.tierName.trim(),
+            Number(tier.minQty) || 1,
+            Number(tier.price) || 0,
+            tier.customerGroup || null,
+          ]);
+        }
+      }
     }
 
     await connection.commit();
@@ -1264,12 +1916,40 @@ export async function updateProductWithUnits(product: Product): Promise<void> {
 }
 
 /**
- * Menghapus produk secara aman (Soft Delete) agar riwayat transaksi & ledger keuangan tetap utuh
+ * Menghapus produk dari database:
+ * - Jika produk BELUM pernah memiliki transaksi penjualan (sale_items = 0), dilakukan Hard Delete total:
+ *   membersihkan riwayat mutasi stok awal, tier harga, satuan kemasan, dan produk secara tuntas.
+ * - Jika produk SUDAH memiliki transaksi penjualan (sale_items > 0), dilakukan Soft Delete (is_active = FALSE)
+ *   dan melepaskan barcode-nya (SET barcode = NULL) agar barcode tidak memicu ER_DUP_ENTRY jika didaftarkan kembali.
  */
 export async function deleteProductInDb(productId: string): Promise<void> {
   const connection = await pool.getConnection();
   try {
-    await connection.execute(`UPDATE products SET is_active = FALSE WHERE id = ?`, [productId]);
+    await connection.beginTransaction();
+
+    // 1. Cek apakah produk pernah terlibat dalam transaksi penjualan
+    const [saleRows] = await connection.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS count FROM sale_items WHERE product_id = ?`,
+      [productId]
+    );
+    const salesCount = Number(saleRows[0]?.count || 0);
+
+    if (salesCount === 0) {
+      // Tidak ada riwayat penjualan: Hapus mutasi stok (misal stok awal), tier harga, satuan, dan produk
+      await connection.execute(`DELETE FROM stock_movements WHERE product_id = ?`, [productId]);
+      await connection.execute(`DELETE FROM product_prices WHERE product_id = ?`, [productId]);
+      await connection.execute(`DELETE FROM product_units WHERE product_id = ?`, [productId]);
+      await connection.execute(`DELETE FROM products WHERE id = ?`, [productId]);
+    } else {
+      // Ada riwayat penjualan: Soft delete produk & lepaskan barcode agar barcode bisa digunakan kembali
+      await connection.execute(`UPDATE products SET is_active = FALSE WHERE id = ?`, [productId]);
+      await connection.execute(`UPDATE product_units SET barcode = NULL WHERE product_id = ?`, [productId]);
+    }
+
+    await connection.commit();
+  } catch (err) {
+    await connection.rollback();
+    throw err;
   } finally {
     connection.release();
   }

@@ -118,8 +118,8 @@ export class EscPosBuilder {
     return this;
   }
 
-  // 8. Cetak item produk belanja
-  printItem(name: string, qty: number, unitName: string, price: number, subtotal: number): this {
+  // 8. Cetak item produk belanja (dengan dukungan harga grosir / tier label - PRD F3.4)
+  printItem(name: string, qty: number, unitName: string, price: number, subtotal: number, tierLabel?: string): this {
     const qtyPriceStr = `  ${qty} ${unitName} x ${price.toLocaleString("id-ID")}`;
     const subtotalStr = subtotal.toLocaleString("id-ID");
 
@@ -129,6 +129,9 @@ export class EscPosBuilder {
       // Baris 2: Qty x Harga di kiri, Subtotal di kanan
       this.line(name);
       this.twoColumns(qtyPriceStr, subtotalStr);
+      if (tierLabel) {
+        this.line(`    * [${tierLabel}]`);
+      }
     } else {
       // Format 80mm (48 kolom)
       // Baris 1: Nama produk (max 22 char), Qty (6 char), Harga (9 char), Subtotal (11 char)
@@ -143,9 +146,13 @@ export class EscPosBuilder {
         const paddedName = name.padEnd(20);
         this.line(`${paddedName} ${formattedQty} ${formattedPrice} ${formattedSubtotal}`);
       }
+      if (tierLabel) {
+        this.line(`    * [${tierLabel}]`);
+      }
     }
     return this;
   }
+
 
   // 9. QR Code ESC/POS standar
   printQrCode(qrData: string, dotSize: number = 4): this {
@@ -242,8 +249,10 @@ export function generateSaleReceiptEscPos(
       it.qty,
       it.unitName,
       it.price,
-      it.subtotal
+      it.subtotal,
+      it.appliedTierName || (it.isWholesalePrice ? "Harga Grosir" : undefined)
     );
+
   }
   builder.horizontalLine("-");
 
