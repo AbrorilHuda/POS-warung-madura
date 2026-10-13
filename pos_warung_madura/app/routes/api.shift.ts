@@ -18,6 +18,7 @@ import {
   completeInitialSetup,
   verifyOwnerPin,
   switchActiveCashier,
+  createAuditLog,
 } from "../services/shift.server";
 
 /**
@@ -111,13 +112,17 @@ export async function action({ request }: ActionFunctionArgs) {
 
       case "verify_owner_pin": {
         const pin = String(body.pin || "").trim();
+        const reason = body.reason ? String(body.reason).trim() : "Otorisasi Akses Sensitif Pemilik";
+        const userName = body.userName ? String(body.userName).trim() : "Kasir";
         if (!pin) {
           return Response.json({ ok: false, error: "PIN Pemilik wajib diisi" }, { status: 400 });
         }
         const valid = await verifyOwnerPin(pin);
         if (!valid) {
+          await createAuditLog("SUPERVISOR_OVERRIDE_FAILED", "auth", null, `Percobaan gagal: ${reason}`, userName);
           return Response.json({ ok: false, error: "PIN Pemilik salah" }, { status: 401 });
         }
+        await createAuditLog("SUPERVISOR_OVERRIDE_APPROVED", "auth", null, `Otorisasi disetujui: ${reason}`, userName);
         return Response.json({ ok: true, message: "Otorisasi Pemilik Berhasil" });
       }
 

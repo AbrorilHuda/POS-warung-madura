@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Users,
   Percent,
+  FileSpreadsheet,
 } from "lucide-react";
 import type { Product, ProductUnit, ProductPriceTier, CustomerGroupType } from "../types/pos";
 import { validateTierList } from "../services/pricing";
@@ -26,6 +27,7 @@ interface ProductCatalogProps {
   onAddProduct: (product: Product) => void;
   onUpdateProduct: (product: Product) => void;
   onDeleteProduct?: (productId: string) => void;
+  onOpenImportExport?: (tab?: "import_products" | "export_data") => void;
 }
 
 // Preset Satuan Dasar (Base Units)
@@ -66,6 +68,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
   onAddProduct,
   onUpdateProduct,
   onDeleteProduct,
+  onOpenImportExport,
 }) => {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Semua");
@@ -500,13 +503,26 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAddModal}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition self-start cursor-pointer shadow-sm active:scale-95"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Tambah Produk Baru</span>
-        </button>
+        <div className="flex items-center gap-2 self-start flex-wrap">
+          {onOpenImportExport && (
+            <button
+              onClick={() => onOpenImportExport("import_products")}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-xs transition cursor-pointer shadow-2xs active:scale-95"
+              title="Import & Ekspor Katalog Produk via Excel/CSV"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Import / Ekspor CSV</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleOpenAddModal}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition cursor-pointer shadow-sm active:scale-95"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Tambah Produk Baru</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter & Search Bar */}

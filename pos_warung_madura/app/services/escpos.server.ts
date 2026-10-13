@@ -220,7 +220,12 @@ export function generateSaleReceiptEscPos(
   const storePhone = options.storePhone || "";
 
   builder.alignCenter();
-  if (isCopy) {
+  if (sale.isVoid) {
+    builder.doubleHeight(true).bold(true).line("*** VOID / DIBATALKAN ***").normalSize().bold(false);
+    if (sale.voidedAt) {
+      builder.line(`Batal: ${sale.voidedAt}`);
+    }
+  } else if (isCopy) {
     builder.bold(true).line("*** SALINAN / COPY ***").bold(false);
   }
   builder.doubleSize(true).bold(true).line(storeName.toUpperCase()).normalSize().bold(false);
@@ -252,13 +257,27 @@ export function generateSaleReceiptEscPos(
       it.subtotal,
       it.appliedTierName || (it.isWholesalePrice ? "Harga Grosir" : undefined)
     );
-
+    if (it.discountAmount && it.discountAmount > 0) {
+      builder.line(`    * Diskon: -Rp ${it.discountAmount.toLocaleString("id-ID")}${it.discountNote ? ` (${it.discountNote})` : ""}`);
+    }
   }
   builder.horizontalLine("-");
 
   // 5. Total & Pembayaran
   const totalQty = sale.items.reduce((sum, it) => sum + (it.qty || 1), 0);
-  builder.twoColumns(`Total Item (${totalQty}) :`, `Rp ${sale.totalAmount.toLocaleString("id-ID")}`);
+  if (sale.discountAmount && sale.discountAmount > 0) {
+    const subtotalBeforeNotaDisc = sale.totalAmount + sale.discountAmount;
+    builder.twoColumns(`Subtotal (${totalQty}) :`, `Rp ${subtotalBeforeNotaDisc.toLocaleString("id-ID")}`);
+    builder.twoColumns("Diskon Nota   :", `-Rp ${sale.discountAmount.toLocaleString("id-ID")}`);
+    if (sale.promoName) {
+      builder.line(`  * Promo: ${sale.promoName}`);
+    } else if (sale.discountReason) {
+      builder.line(`  * Ket: ${sale.discountReason}`);
+    }
+    builder.twoColumns("Total Tagihan :", `Rp ${sale.totalAmount.toLocaleString("id-ID")}`);
+  } else {
+    builder.twoColumns(`Total Item (${totalQty}) :`, `Rp ${sale.totalAmount.toLocaleString("id-ID")}`);
+  }
 
   if (sale.paymentMethod === "Tunai") {
     builder.twoColumns("Metode Bayar :", "Tunai");
@@ -368,5 +387,103 @@ export function generateTestPrintEscPos(options: {
 export function generateCashDrawerKickEscPos(): Buffer {
   const builder = new EscPosBuilder(58);
   builder.cashDrawerKick();
+  return builder.getBuffer();
+}
+
+/**
+ * Men-generate struk laporan ringkasan shift kasir & rekonsiliasi kas laci (PRD F5.4 & F9.6).
+ */
+export function generateShiftReportEscPos(
+  shift: any,
+  options?: {
+    paperWidth?: 58 | 80;
+    storeConfig?: StoreConfig;
+    storePhone?: string;
+    autoCut?: boolean;
+  }
+): Buffer {
+  const paperWidth = options?.paperWidth || 58;
+  const storeConfig = options?.storeConfig;
+  const builder = new EscPosBuilder(paperWidth);
+
+  // 1. Header Toko
+  builder.alignCenter();
+  builder.bold(true).doubleHeight(true).line(storeConfig?.storeName || "WARUNG MADURA").normalSize().bold(false);
+  if (storeConfig?.storeAddress) {
+    builder.line(storeConfig.storeAddress);
+  }
+  const phone = options?.storePhone || (storeConfig as any)?.ownerPhone || (storeConfig as any)?.storePhone || "0812-3456-7890";
+  builder.line(`Telp/WA: ${phone}`);
+  builder.horizontalLine("=");
+
+  // 2. Judul Dokumen
+  builder.alignCenter();
+  builder.bold(true).line("LAPORAN RINGKASAN SHIFT").bold(false);
+  builder.line(`Status: ${shift.status === "open" ? "AKTIF (BERJALAN)" : "SUDAH DITUTUP"}`);
+  builder.horizontalLine("-");
+
+  // 3. Info Kasir & Waktu
+  builder.alignLeft();
+  builder.twoColumns("Kode Shift  :", shift.shiftCode || String(shift.id || "").slice(0, 12));
+  builder.twoColumns("Nama Kasir  :", String(shift.cashierName || "Kasir"));
+  builder.twoColumns("Mulai Shift :", shift.startTime ? new Date(shift.startTime).toLocaleString("id-ID") : "-");
+  if (shift.endTime) {
+    builder.twoColumns("Selesai     :", new Date(shift.endTime).toLocaleString("id-ID"));
+  }
+  builder.horizontalLine("-");
+
+  // 4. Rincian Penerimaan & Arus Kas Laci
+  builder.line("[ REKAP PENERIMAAN KAS ]");
+  builder.twoColumns("Modal Awal Laci   :", `Rp ${(Number(shift.startingCash) || 0).toLocaleString("id-ID")}`);
+  builder.twoColumns("Penjualan Tunai   :", `Rp ${(Number(shift.totalCashSales) || 0).toLocaleString("id-ID")}`);
+  builder.twoColumns("Penjualan QRIS    :", `Rp ${(Number(shift.totalQrisSales) || 0).toLocaleString("id-ID")}`);
+  builder.twoColumns("Kasbon Baru       :", `Rp ${(Number(shift.totalDebtSales) || 0).toLocaleString("id-ID")}`);
+  builder.twoColumns("Pelunasan Kasbon  :", `Rp ${(Number(shift.totalDebtCollectedCash) || 0).toLocaleString("id-ID")}`);
+  if (Number(shift.totalCashIn || 0) > 0) {
+    builder.twoColumns("Kas Masuk (In)    :", `Rp ${Number(shift.totalCashIn).toLocaleString("id-ID")}`);
+  }
+  if (Number(shift.totalCashOut || 0) > 0) {
+    builder.twoColumns("Kas Keluar (Out)  :", `Rp ${Number(shift.totalCashOut).toLocaleString("id-ID")}`);
+  }
+  builder.horizontalLine("-");
+
+  // 5. Total Estimasi vs Fisik
+  builder.bold(true);
+  builder.twoColumns("KAS DIHARAPKAN    :", `Rp ${(Number(shift.expectedCash) || 0).toLocaleString("id-ID")}`);
+  if (shift.actualCash !== null && shift.actualCash !== undefined) {
+    builder.twoColumns("HITUNGAN FISIK    :", `Rp ${(Number(shift.actualCash) || 0).toLocaleString("id-ID")}`);
+    const diff = Number(shift.cashDifference) || 0;
+    const diffLabel =
+      diff === 0
+        ? "PAS (Rp 0)"
+        : diff > 0
+        ? `LEBIH (+Rp ${diff.toLocaleString("id-ID")})`
+        : `KURANG (-Rp ${Math.abs(diff).toLocaleString("id-ID")})`;
+    builder.twoColumns("SELISIH KAS LACI  :", diffLabel);
+  }
+  builder.bold(false);
+  builder.horizontalLine("=");
+
+  if (shift.notes) {
+    builder.alignLeft();
+    builder.line(`Catatan: ${shift.notes}`);
+    builder.feed(1);
+  }
+
+  // 6. Tanda Tangan Kasir & Pemilik
+  builder.alignCenter();
+  builder.feed(1);
+  builder.line("Petugas Kasir        Pemilik Toko");
+  builder.feed(2);
+  builder.line(`( ${shift.cashierName || "Kasir"} )        ( .............. )`);
+  builder.feed(1);
+  builder.line("Dicetak: " + new Date().toLocaleString("id-ID"));
+
+  if (options?.autoCut) {
+    builder.cutPaper();
+  } else {
+    builder.feed(3);
+  }
+
   return builder.getBuffer();
 }

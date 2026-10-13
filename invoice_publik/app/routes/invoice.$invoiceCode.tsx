@@ -348,8 +348,21 @@ export default function PublicInvoicePage() {
           </div>
         </div>
 
+        {/* Banner VOID Transaksi */}
+        {invoice.isVoid && (
+          <div className="bg-rose-600 text-white px-5 py-3 text-center font-black tracking-widest text-xs uppercase flex items-center justify-center gap-2">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <span>TRANSAKSI INI TELAH DI-VOID / DIBATALKAN OLEH KASIR</span>
+          </div>
+        )}
+
         {/* Header Warung */}
         <div className="bg-gradient-to-b from-slate-900 to-slate-950 text-white p-6 text-center relative overflow-hidden">
+          {invoice.isVoid && (
+            <div className="mb-3 py-1 px-3 rounded-lg bg-rose-500/20 border border-rose-400 text-rose-300 font-bold text-xs uppercase inline-block">
+              Status Faktur: VOID
+            </div>
+          )}
           <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 text-white flex items-center justify-center mx-auto mb-3 backdrop-blur-xs">
             <Store className="w-6 h-6 text-emerald-400" />
           </div>
@@ -443,6 +456,11 @@ export default function PublicInvoicePage() {
                   </div>
                   <div className="text-[11px] text-slate-500 font-mono mt-0.5">
                     {it.quantity} {it.unitName} × Rp {it.price.toLocaleString("id-ID")}
+                    {Boolean(it.discountAmount && it.discountAmount > 0) && (
+                      <span className="ml-1.5 text-amber-700 font-sans font-bold">
+                        (Diskon -Rp {it.discountAmount?.toLocaleString("id-ID")})
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -459,13 +477,22 @@ export default function PublicInvoicePage() {
           <div className="flex items-center justify-between text-xs text-slate-600">
             <span>Subtotal ({invoice.items.length} Macam Barang)</span>
             <span className="font-mono font-medium">
-              Rp {invoice.totalAmount.toLocaleString("id-ID")}
+              Rp {(invoice.totalAmount + (invoice.discountAmount || 0)).toLocaleString("id-ID")}
             </span>
           </div>
 
+          {Boolean(invoice.discountAmount && invoice.discountAmount > 0) && (
+            <div className="flex items-center justify-between text-xs text-emerald-600 font-semibold">
+              <span>Diskon / Promo {invoice.promoName ? `(${invoice.promoName})` : ""}</span>
+              <span className="font-mono">
+                - Rp {invoice.discountAmount?.toLocaleString("id-ID")}
+              </span>
+            </div>
+          )}
+
           <div className="pt-2 border-t border-dashed border-slate-200 flex items-center justify-between">
             <span className="text-sm font-bold text-slate-900">Total Belanja</span>
-            <span className="text-lg font-black text-slate-900 font-mono">
+            <span className={`text-lg font-black font-mono ${invoice.isVoid ? "text-rose-600 line-through" : "text-slate-900"}`}>
               Rp {invoice.totalAmount.toLocaleString("id-ID")}
             </span>
           </div>

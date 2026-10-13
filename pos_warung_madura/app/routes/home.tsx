@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Route } from "./+types/home";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useNavigation, useActionData } from "react-router";
+import { useLoaderData, useSubmit, useNavigation, useActionData, useRevalidator } from "react-router";
 import { testDbConnection } from "../db.server";
 import {
   getProductsFromDb,
@@ -35,6 +35,7 @@ import { ConnectPhoneScannerModal } from "../components/ConnectPhoneScannerModal
 import { ShiftModal } from "../components/ShiftModal";
 import { OnboardingSetupModal } from "../components/OnboardingSetupModal";
 import { VoidReturnModal } from "../components/VoidReturnModal";
+import { ImportExportModal } from "../components/ImportExportModal";
 import { sendCustomerDisplayEvent } from "../services/customerDisplaySync";
 import type {
   Product,
@@ -271,6 +272,7 @@ export default function Home() {
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
+  const revalidator = useRevalidator();
 
   const [activeTab, setActiveTab] = useState<
     "kasir" | "katalog" | "kulakan" | "opname" | "kasbon" | "laporan"
@@ -306,6 +308,19 @@ export default function Home() {
   const [isVoidReturnModalOpen, setIsVoidReturnModalOpen] = useState(false);
   const [selectedInvoiceForVoid, setSelectedInvoiceForVoid] = useState<string>("");
   const [activeShift, setActiveShift] = useState<any>(null);
+
+  // Pusat Import & Ekspor Data (PRD F10)
+  const [isImportExportModalOpen, setIsImportExportModalOpen] = useState(false);
+  const [importExportInitialTab, setImportExportInitialTab] = useState<
+    "import_products" | "import_customers" | "export_data"
+  >("import_products");
+
+  const handleOpenImportExport = (
+    tab: "import_products" | "import_customers" | "export_data" = "import_products"
+  ) => {
+    setImportExportInitialTab(tab);
+    setIsImportExportModalOpen(true);
+  };
 
   // Setup Awal Onboarding Wizard Modal (PRD F5.1)
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
@@ -784,6 +799,7 @@ export default function Home() {
           setSelectedInvoiceForVoid("");
           setIsVoidReturnModalOpen(true);
         }}
+        onOpenImportExportModal={handleOpenImportExport}
       />
 
       {/* Main Content */}
@@ -843,6 +859,10 @@ export default function Home() {
             onRequestUnknownBarcode={handleRequestUnknownBarcode}
             quickScanTriggerBarcode={quickScanTriggerBarcode}
             onClearQuickScanTrigger={() => setQuickScanTriggerBarcode(null)}
+            onOpenVoidReturnModal={() => {
+              setSelectedInvoiceForVoid("");
+              setIsVoidReturnModalOpen(true);
+            }}
           />
         )}
 
@@ -852,6 +872,7 @@ export default function Home() {
             onAddProduct={handleAddProduct}
             onUpdateProduct={handleUpdateProduct}
             onDeleteProduct={handleDeleteProduct}
+            onOpenImportExport={(tab) => handleOpenImportExport(tab || "import_products")}
           />
         )}
 
@@ -860,6 +881,7 @@ export default function Home() {
             products={products}
             stockMovements={stockMovements}
             onAddStockMovement={handleAddStockMovement}
+            onRefreshData={() => revalidator.revalidate()}
             quickScanTriggerBarcode={quickScanKulakanBarcode}
             onClearQuickScanTrigger={() => setQuickScanKulakanBarcode(null)}
             onRequestUnknownBarcode={handleRequestUnknownBarcode}
@@ -876,13 +898,18 @@ export default function Home() {
         )}
 
         {activeTab === "kasbon" && (
-          <PelangganKasbon />
+          <PelangganKasbon
+            onOpenImportExport={(tab) => handleOpenImportExport(tab || "import_customers")}
+            onRefreshTrigger={() => revalidator.revalidate()}
+          />
         )}
 
         {activeTab === "laporan" && (
           <Laporan
             sales={sales}
             products={products}
+            activeShift={activeShift}
+            onOpenShiftModal={() => setIsShiftModalOpen(true)}
             onViewSaleReceipt={(sale) => {
               setActiveReceiptSale(sale);
               setIsReceiptOpen(true);
@@ -968,6 +995,19 @@ export default function Home() {
         onCompleted={handleOnboardingCompleted}
         defaultStoreName={loaderData.storeConfig?.storeName}
         defaultStoreAddress={loaderData.storeConfig?.storeAddress}
+      />
+
+      {/* Pusat Import & Ekspor Data Excel/CSV (PRD F10) */}
+      <ImportExportModal
+        isOpen={isImportExportModalOpen}
+        onClose={() => setIsImportExportModalOpen(false)}
+        initialTab={importExportInitialTab}
+        onProductsImported={() => {
+          revalidator.revalidate();
+        }}
+        onCustomersImported={() => {
+          revalidator.revalidate();
+        }}
       />
     </div>
   );

@@ -12,6 +12,7 @@ import {
   generateSaleReceiptEscPos,
   generateTestPrintEscPos,
   generateCashDrawerKickEscPos,
+  generateShiftReportEscPos,
 } from "./escpos.server";
 import type { Sale } from "../types/pos";
 
@@ -404,6 +405,34 @@ export async function executeOpenCashDrawer(
     return {
       success: false,
       message: `Gagal membuka laci: ${err.message}`,
+    };
+  }
+}
+
+/**
+ * Mencetak struk laporan ringkasan shift kasir ke printer thermal (PRD F5.4 & F9.6).
+ */
+export async function printShiftReport(
+  shift: any,
+  options?: { settings?: PrinterSettings }
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const settings = options?.settings || (await getPrinterSettingsFromDb());
+    const storeConfig = getStoreConfig();
+
+    const buffer = generateShiftReportEscPos(shift, {
+      paperWidth: settings.paperWidth,
+      storeConfig,
+      storePhone: settings.storePhone,
+      autoCut: settings.autoCut,
+    });
+
+    return await sendRawBufferToPrinter(buffer, settings);
+  } catch (err: any) {
+    console.error("[printShiftReport error]:", err);
+    return {
+      success: false,
+      message: `Gagal mencetak laporan shift: ${err.message}`,
     };
   }
 }

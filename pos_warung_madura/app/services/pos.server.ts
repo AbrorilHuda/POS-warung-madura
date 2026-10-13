@@ -223,12 +223,13 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
     const activeCashierName = shiftRows.length > 0 ? String(shiftRows[0].cashier_name) : null;
     const finalCashierName = sale.cashierName || activeCashierName || process.env.CASHIER_DEFAULT_NAME || "Kasir";
 
-    // 1. Simpan Header Sales (termasuk customer_id dan shift_id)
+    // 1. Simpan Header Sales (termasuk customer_id, shift_id, diskon & promo - PRD F6)
     await connection.execute(`
       INSERT INTO sales (
         id, invoice_code, total_amount, paid_amount, change_amount, 
-        payment_method, customer_id, customer_name, cashier_name, sync_status, shift_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        payment_method, customer_id, customer_name, cashier_name, sync_status, shift_id,
+        discount_amount, discount_type, discount_reason, promo_name
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       sale.id,
       sale.invoiceCode,
@@ -241,6 +242,10 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
       finalCashierName,
       sale.syncStatus,
       activeShiftId,
+      sale.discountAmount || 0,
+      sale.discountType || null,
+      sale.discountReason || null,
+      sale.promoName || null,
     ]);
 
     // 1b. Jika pembayaran adalah Kasbon atau pembayaran sebagian dengan sisa utang (PRD F1.2 & F1.3)
@@ -301,8 +306,9 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
       await connection.execute(`
         INSERT INTO sale_items (
           id, sale_id, product_id, snapshot_product_name, snapshot_unit_name,
-          conversion_ratio, price, cost_price, quantity, subtotal, applied_tier_name
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          conversion_ratio, price, cost_price, quantity, subtotal, applied_tier_name,
+          discount_amount, discount_type, discount_note
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         itemId,
         sale.id,
@@ -315,6 +321,9 @@ export async function createSaleTransaction(sale: Sale): Promise<void> {
         item.qty,
         item.subtotal,
         item.appliedTierName || null,
+        item.discountAmount || 0,
+        item.discountType || null,
+        item.discountNote || null,
       ]);
 
       // Kurangi stok di ledger (nilai negatif di base unit)
@@ -445,13 +454,44 @@ export async function createStockKulakan(params: {
       `Kulakan dari ${supplier} (Batch: ${cleanBatchNo})`,
     ]);
 
-    // 3. Update referensi cost price di product_units
-    if (costPrice > 0 && unit?.id) {
-      await connection.execute(`
-        UPDATE product_units 
-        SET cost_price = ? 
-        WHERE id = ?
-      `, [costPrice, unit.id]);
+    // 3. Update referensi cost price di product_units & Algoritma Moving Average HPP (PRD F8.3)
+    if (costPrice > 0) {
+      try {
+        const [stockRows] = await connection.query<RowDataPacket[]>(
+          `SELECT COALESCE(SUM(quantity_in_base_unit), 0) AS total_stock
+           FROM stock_movements
+           WHERE product_id = ? AND id != ?`,
+          [productId, movementId]
+        );
+        const currentStockBase = Number((stockRows as any)[0]?.total_stock || 0);
+
+        const [baseUnitRows] = await connection.query<RowDataPacket[]>(
+          `SELECT cost_price FROM product_units WHERE product_id = ? AND is_base_unit = TRUE LIMIT 1`,
+          [productId]
+        );
+        const currentBaseCost = Number((baseUnitRows as any)[0]?.cost_price || 0);
+
+        let newBaseCost = costPerBaseUnit;
+        if (currentStockBase > 0 && currentBaseCost > 0) {
+          const combinedStock = currentStockBase + qtyInBaseUnit;
+          if (combinedStock > 0) {
+            newBaseCost = (currentStockBase * currentBaseCost + qtyInBaseUnit * costPerBaseUnit) / combinedStock;
+          }
+        }
+        newBaseCost = Math.round(newBaseCost * 100) / 100;
+
+        await connection.execute(
+          `UPDATE product_units 
+           SET cost_price = ROUND(? * conversion_ratio, 2)
+           WHERE product_id = ?`,
+          [newBaseCost, productId]
+        );
+      } catch (errHpp) {
+        console.warn("[createStockKulakan HPP warning]:", errHpp);
+        if (unit?.id) {
+          await connection.execute(`UPDATE product_units SET cost_price = ? WHERE id = ?`, [costPrice, unit.id]);
+        }
+      }
     }
 
     await connection.commit();
@@ -968,6 +1008,13 @@ export async function getSalesFromDb(): Promise<Sale[]> {
       payment_method AS paymentMethod, customer_id AS customerId,
       customer_name AS customerName, cashier_name AS cashierName,
       sync_status AS syncStatus,
+      is_void AS isVoid, void_reason AS voidReason,
+      DATE_FORMAT(voided_at, '%Y-%m-%d %H:%i:%s') AS voidedAt,
+      voided_by AS voidedBy,
+      discount_amount AS discountAmount,
+      discount_type AS discountType,
+      discount_reason AS discountReason,
+      promo_name AS promoName,
       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS timestamp
     FROM sales
     ORDER BY created_at DESC
@@ -981,7 +1028,9 @@ export async function getSalesFromDb(): Promise<Sale[]> {
       id, sale_id AS saleId, product_id AS productId,
       snapshot_product_name AS productName, snapshot_unit_name AS unitName,
       conversion_ratio AS conversionRatio, price, cost_price AS costPrice,
-      quantity AS qty, subtotal, applied_tier_name AS appliedTierName
+      quantity AS qty, subtotal, applied_tier_name AS appliedTierName,
+      discount_amount AS discountAmount, discount_type AS discountType,
+      discount_note AS discountNote
     FROM sale_items
   `);
 
@@ -997,6 +1046,14 @@ export async function getSalesFromDb(): Promise<Sale[]> {
     customerName: s.customerName || undefined,
     syncStatus: s.syncStatus,
     cashierName: s.cashierName,
+    isVoid: Boolean(s.isVoid),
+    voidReason: s.voidReason || undefined,
+    voidedAt: s.voidedAt || undefined,
+    voidedBy: s.voidedBy || undefined,
+    discountAmount: Number(s.discountAmount || 0),
+    discountType: s.discountType || undefined,
+    discountReason: s.discountReason || undefined,
+    promoName: s.promoName || undefined,
     items: itemRows
       .filter((it) => it.saleId === s.id)
       .map((it) => ({
@@ -1009,6 +1066,9 @@ export async function getSalesFromDb(): Promise<Sale[]> {
         subtotal: Number(it.subtotal),
         costPrice: it.costPrice ? Number(it.costPrice) : undefined,
         appliedTierName: it.appliedTierName || undefined,
+        discountAmount: Number(it.discountAmount || 0),
+        discountType: it.discountType || undefined,
+        discountNote: it.discountNote || undefined,
       })),
   }));
 }
@@ -1619,12 +1679,16 @@ export async function pushSaleToPublicInvoice(sale: Sale): Promise<PushSaleResul
         paymentMethod: sale.paymentMethod,
         cashierName: sale.cashierName || storeConfig.cashierName,
         createdAt: new Date().toISOString(),
+        isVoid: Boolean(sale.isVoid),
+        discountAmount: sale.discountAmount || 0,
+        promoName: sale.promoName,
         items: sale.items.map((it) => ({
           productName: it.productName,
           unitName: it.unitName,
           qty: it.qty,
           price: it.price,
           subtotal: it.subtotal,
+          discountAmount: it.discountAmount || 0,
         })),
       },
     };

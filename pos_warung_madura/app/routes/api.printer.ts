@@ -6,8 +6,10 @@ import {
   executeTestPrint,
   executeOpenCashDrawer,
   printSaleReceipt,
+  printShiftReport,
   type PrinterSettings,
 } from "../services/printer.server";
+import { getActiveShift } from "../services/shift.server";
 import type { Sale } from "../types/pos";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -114,6 +116,34 @@ export async function action({ request }: ActionFunctionArgs) {
       const sale: Sale = JSON.parse(saleJson);
       const result = await printSaleReceipt(sale, { isCopy });
 
+      return Response.json({
+        ok: result.success,
+        message: result.message,
+      });
+    }
+
+    if (intent === "print_shift" || intent === "print_shift_report") {
+      const shiftJson = formData.get("shift") as string;
+      let shiftData: any = null;
+
+      if (shiftJson) {
+        try {
+          shiftData = JSON.parse(shiftJson);
+        } catch {}
+      }
+
+      if (!shiftData) {
+        shiftData = await getActiveShift();
+      }
+
+      if (!shiftData) {
+        return Response.json(
+          { ok: false, message: "Tidak ada shift aktif untuk dicetak." },
+          { status: 400 }
+        );
+      }
+
+      const result = await printShiftReport(shiftData);
       return Response.json({
         ok: result.success,
         message: result.message,

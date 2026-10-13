@@ -11,4 +11,7 @@ export default [
   route("api/shift", "routes/api.shift.ts"),
   route("api/returns", "routes/api.returns.ts"),
   route("api/stock", "routes/api.stock.ts"),
+  route("api/promotions", "routes/api.promotions.ts"),
+  route("api/suppliers", "routes/api.suppliers.ts"),
+  route("api/data-io", "routes/api.data-io.ts"),
 ] satisfies RouteConfig;

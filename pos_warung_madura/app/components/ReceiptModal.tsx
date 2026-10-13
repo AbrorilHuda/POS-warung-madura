@@ -179,12 +179,16 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         {/* Top Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-white">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
-              <CheckCircle2 className="w-4 h-4" />
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center border ${
+              sale.isVoid
+                ? "bg-rose-50 text-rose-600 border-rose-200"
+                : "bg-emerald-50 text-emerald-600 border-emerald-100"
+            }`}>
+              {sale.isVoid ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
             </div>
             <div>
-              <h3 className="font-bold text-slate-900 text-sm leading-tight">
-                Transaksi Berhasil
+              <h3 className={`font-bold text-sm leading-tight ${sale.isVoid ? "text-rose-600" : "text-slate-900"}`}>
+                {sale.isVoid ? "Transaksi Void (Dibatalkan)" : "Transaksi Berhasil"}
               </h3>
               <p className="text-[11px] text-slate-500 font-mono">
                 {sale.invoiceCode}
@@ -234,6 +238,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Banner Transaksi Void (PRD F6.1) */}
+        {sale.isVoid && (
+          <div className="bg-rose-600 text-white px-5 py-2 text-xs font-bold flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>TRANSAKSI INI TELAH DI-VOID / DIBATALKAN</span>
+            </span>
+            {sale.voidedAt && (
+              <span className="text-[11px] text-rose-100 font-mono">
+                {sale.voidedAt}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Realtime Thermal Print Toast */}
         {thermalToast && (
@@ -286,6 +305,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <p className="text-[9px] text-slate-400">
                   {storeConfig?.storeAddress || "Jl. Raya Warung Madura No. 24"}
                 </p>
+                {sale.isVoid && (
+                  <div className="mt-2 py-1 bg-rose-50 border border-rose-300 text-rose-700 font-black text-[11px] tracking-wider rounded">
+                    *** VOID / DIBATALKAN ***
+                  </div>
+                )}
               </div>
 
               {/* Rincian Kasbon & Sisa Utang (PRD F1.10) */}
@@ -358,6 +382,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             >
               {/* Header Warung Gradient */}
               <div className="bg-gradient-to-b from-slate-900 to-slate-950 text-white p-5 text-center relative">
+                {sale.isVoid && (
+                  <div className="mb-3 py-1.5 px-3 rounded-xl bg-rose-600 text-white font-black text-xs tracking-wider uppercase flex items-center justify-center gap-1.5 shadow-md">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>STATUS NOTA: VOID / DIBATALKAN</span>
+                  </div>
+                )}
                 <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/20 text-white flex items-center justify-center mx-auto mb-2 backdrop-blur-xs">
                   <Store className="w-5 h-5 text-emerald-400" />
                 </div>
@@ -450,6 +480,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                               🏷️ {it.appliedTierName || "Harga Grosir"}
                             </span>
                           )}
+                          {Boolean(it.discountAmount && it.discountAmount > 0) && (
+                            <span className="text-[9px] font-sans font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded">
+                              Diskon -Rp {it.discountAmount?.toLocaleString("id-ID")} {it.discountNote ? `(${it.discountNote})` : ""}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -467,13 +502,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <div className="flex items-center justify-between text-xs text-slate-600">
                   <span>Subtotal ({sale.items.length} Macam Barang)</span>
                   <span className="font-mono font-medium">
-                    Rp {sale.totalAmount.toLocaleString("id-ID")}
+                    Rp {(sale.totalAmount + (sale.discountAmount || 0)).toLocaleString("id-ID")}
                   </span>
                 </div>
 
+                {Boolean(sale.discountAmount && sale.discountAmount > 0) && (
+                  <div className="flex items-center justify-between text-xs text-emerald-600 font-semibold">
+                    <span>
+                      Diskon Nota {sale.promoName ? `(${sale.promoName})` : sale.discountReason ? `(${sale.discountReason})` : ""}
+                    </span>
+                    <span className="font-mono">
+                      - Rp {sale.discountAmount?.toLocaleString("id-ID")}
+                    </span>
+                  </div>
+                )}
+
                 <div className="pt-2 border-t border-dashed border-slate-200 flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-900">Total Belanja</span>
-                  <span className="text-base font-black text-slate-900 font-mono">
+                  <span className={`text-base font-black font-mono ${sale.isVoid ? "text-rose-600 line-through" : "text-slate-900"}`}>
                     Rp {sale.totalAmount.toLocaleString("id-ID")}
                   </span>
                 </div>

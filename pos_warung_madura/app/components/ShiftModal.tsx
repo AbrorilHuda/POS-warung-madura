@@ -102,7 +102,26 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({
   const [switchPinInput, setSwitchPinInput] = useState<string>("");
 
   // Handler Cetak Struk Ringkasan Shift Kasir (PRD F5.6)
-  const handlePrintShiftReceipt = (s: ShiftData) => {
+  const handlePrintShiftReceipt = async (s: ShiftData) => {
+    try {
+      const fd = new FormData();
+      fd.append("intent", "print_shift_report");
+      fd.append("shift", JSON.stringify(s));
+
+      const res = await fetch("/api/printer", {
+        method: "POST",
+        body: fd,
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        setSuccessMsg("Struk ringkasan shift berhasil dikirim ke printer thermal!");
+        setTimeout(() => setSuccessMsg(null), 3500);
+        return;
+      }
+    } catch {}
+
+    // Fallback: Cetak via browser window popup
     const printWindow = window.open("", "_blank", "width=380,height=600");
     if (!printWindow) return;
 

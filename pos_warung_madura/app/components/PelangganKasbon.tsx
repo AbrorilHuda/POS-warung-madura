@@ -29,6 +29,7 @@ import {
   List,
   Sparkles,
   Info,
+  FileSpreadsheet,
 } from "lucide-react";
 import type {
   CustomerSummary,
@@ -38,9 +39,13 @@ import type {
 
 interface PelangganKasbonProps {
   onRefreshTrigger?: () => void;
+  onOpenImportExport?: (tab?: "import_customers" | "export_data") => void;
 }
 
-export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
+export const PelangganKasbon: React.FC<PelangganKasbonProps> = ({
+  onRefreshTrigger,
+  onOpenImportExport,
+}) => {
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -351,7 +356,7 @@ export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
           <button
             onClick={loadCustomers}
             disabled={loading}
@@ -360,6 +365,18 @@ export const PelangganKasbon: React.FC<PelangganKasbonProps> = () => {
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-emerald-600" : ""}`} />
           </button>
+
+          {onOpenImportExport && (
+            <button
+              onClick={() => onOpenImportExport("import_customers")}
+              className="px-3.5 py-2.5 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95"
+              title="Import & Ekspor Data Pelanggan dan Kasbon via CSV/Excel"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Import / Ekspor CSV</span>
+            </button>
+          )}
+
           <button
             onClick={handleOpenAddModal}
             className="px-4 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-2 transition cursor-pointer shadow-xs active:scale-95"

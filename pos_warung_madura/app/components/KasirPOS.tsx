@@ -19,6 +19,10 @@ import {
   Tag,
   Sparkles,
   Upload,
+  Gift,
+  Percent,
+  Shield,
+  ArrowDownRight,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import confetti from "canvas-confetti";
@@ -27,9 +31,12 @@ import {
   sendCustomerDisplayEvent,
   listenKasirRequestState,
 } from "../services/customerDisplaySync";
-import type { Product, ProductUnit, CartItem, Sale, CustomerSummary, CustomerGroupType } from "../types/pos";
+import type { Product, ProductUnit, CartItem, Sale, CustomerSummary, CustomerGroupType, Promotion } from "../types/pos";
 import type { StoreConfig } from "../services/pos.server";
 import { calculateTieredPrice, getNextTierUpsell } from "../services/pricing";
+import { evaluateCartPromotions } from "../services/promo";
+import { PromoModal } from "./PromoModal";
+import { ManualDiscountModal } from "./ManualDiscountModal";
 
 
 interface KasirPOSProps {
@@ -43,6 +50,7 @@ interface KasirPOSProps {
   storeConfig?: StoreConfig;
   activeShift?: any;
   onRequireOpenShift?: () => void;
+  onOpenVoidReturnModal?: () => void;
 }
 
 export const KasirPOS: React.FC<KasirPOSProps> = ({
@@ -56,6 +64,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
   storeConfig,
   activeShift,
   onRequireOpenShift,
+  onOpenVoidReturnModal,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Semua");
@@ -68,6 +77,48 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
   const [pinInput, setPinInput] = useState<string>("");
   const [pinError, setPinError] = useState<string>("");
   const [isPinApproved, setIsPinApproved] = useState<boolean>(false);
+
+  // PRD F6.3 & F6.4: Promo & Diskon States
+  const [activePromotions, setActivePromotions] = useState<Promotion[]>([]);
+  const [isPromoModalOpen, setIsPromoModalOpen] = useState<boolean>(false);
+  const [manualDiscountModalState, setManualDiscountModalState] = useState<{
+    isOpen: boolean;
+    targetType: "item" | "transaction";
+    cartItemId?: string;
+    originalPrice: number;
+    unitPrice?: number;
+    qty?: number;
+    costPrice?: number;
+    title?: string;
+  }>({
+    isOpen: false,
+    targetType: "item",
+    originalPrice: 0,
+  });
+  const [transactionDiscount, setTransactionDiscount] = useState<{
+    amount: number;
+    type: "percentage" | "fixed_amount";
+    value: number;
+    reason?: string;
+  } | null>(null);
+
+  const loadActivePromos = () => {
+    fetch("/api/promotions?active=true")
+      .then((r) => {
+        if (!r.ok) return null;
+        const ct = r.headers.get("content-type") || "";
+        if (!ct.includes("application/json")) return null;
+        return r.json();
+      })
+      .then((d) => {
+        if (d && d.ok && d.promotions) setActivePromotions(d.promotions);
+      })
+      .catch(() => { });
+  };
+
+  useEffect(() => {
+    loadActivePromos();
+  }, []);
 
   // Split Payment & QRIS States (PRD F4)
   const [showQrisModal, setShowQrisModal] = useState<boolean>(false);
@@ -98,7 +149,25 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
 
   const storePrefix = storeConfig?.storeCode || "WM01";
   const currentInvoiceCode = `${storePrefix}-${String(invoiceSeq).padStart(6, "0")}`;
-  const grandTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+
+  // Evaluasi Promo Otomatis Real-time (PRD F6.4)
+  const promoResult = evaluateCartPromotions(cart, activePromotions);
+
+  const cartSubtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const totalItemDiscounts = cart.reduce((sum, item) => {
+    const manual = item.discountAmount || 0;
+    const promo = promoResult.itemDiscounts.get(item.id)?.discountAmount || 0;
+    return sum + manual + promo;
+  }, 0);
+
+  const effectiveTrxDiscount = transactionDiscount
+    ? transactionDiscount.type === "percentage"
+      ? Math.round(((cartSubtotal - totalItemDiscounts) * transactionDiscount.value) / 100)
+      : Math.min(cartSubtotal - totalItemDiscounts, transactionDiscount.value)
+    : 0;
+
+  const totalSavings = totalItemDiscounts + effectiveTrxDiscount;
+  const grandTotal = Math.max(0, cartSubtotal - totalSavings);
   const changeAmount = Math.max(0, paidAmount - grandTotal);
 
   // Inisialisasi gambar stiker QRIS dari localStorage
@@ -581,6 +650,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
   const clearCart = (broadcastStandby = true) => {
     setCart([]);
     setPaidAmount(0);
+    setTransactionDiscount(null);
     if (broadcastStandby) {
       lastCompletedSaleRef.current = null;
       sendCustomerDisplayEvent({
@@ -670,29 +740,45 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
     }
 
     const debtRemainder = isKasbon ? Math.max(0, grandTotal - actualPaid) : 0;
+    const appliedPromoNames = promoResult.appliedPromos.map((p) => p.promoName).filter(Boolean);
 
     const newSale: Sale = {
       id: `sale-${Date.now()}`,
       invoiceCode: currentInvoiceCode,
       timestamp: new Date().toLocaleString("id-ID"),
-      items: cart.map((c) => ({
-        productId: c.productId,
-        productName: c.productName,
-        unitName: c.unitName,
-        conversionRatio: c.conversionRatio,
-        price: c.price,
-        qty: c.qty,
-        subtotal: c.price * c.qty,
-        costPrice: c.costPrice,
-        basePrice: c.basePrice,
-        appliedTierName: c.appliedTierName,
-        isWholesalePrice: c.isWholesalePrice,
-      })),
+      items: cart.map((c) => {
+        const promoInfo = promoResult.itemDiscounts.get(c.id);
+        const manual = c.discountAmount || 0;
+        const promo = promoInfo?.discountAmount || 0;
+        const lineDisc = manual + promo;
+        const originalLineSubtotal = c.price * c.qty;
+
+        return {
+          productId: c.productId,
+          productName: c.productName,
+          unitName: c.unitName,
+          conversionRatio: c.conversionRatio,
+          price: c.price,
+          qty: c.qty,
+          subtotal: Math.max(0, originalLineSubtotal - lineDisc),
+          costPrice: c.costPrice,
+          basePrice: c.basePrice,
+          appliedTierName: c.appliedTierName,
+          isWholesalePrice: c.isWholesalePrice,
+          discountAmount: lineDisc,
+          discountType: c.discountType || (promo ? "promo" : undefined),
+          discountNote: c.discountNote || promoInfo?.promoName,
+        };
+      }),
       totalAmount: grandTotal,
       paidAmount: actualPaid,
       changeAmount: actualChange,
       paymentMethod: isKasbon ? "Kasbon" : paymentMethod,
       splitPayments: splitPaymentsList,
+      discountAmount: totalSavings,
+      discountType: transactionDiscount ? "transaction_discount" : totalItemDiscounts > 0 ? "item_discount" : undefined,
+      discountReason: transactionDiscount?.reason,
+      promoName: appliedPromoNames.length > 0 ? appliedPromoNames.join(", ") : undefined,
       customerId: selectedCustomerId || undefined,
       customerName: selectedCustomer?.name || undefined,
       customerDebtRemaining: isKasbon ? (selectedCustomer?.totalDebt || 0) + debtRemainder : undefined,
@@ -712,6 +798,7 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
     clearCart(false);
     setSelectedCustomerId("");
     setIsPinApproved(false);
+    setTransactionDiscount(null);
   };
 
   const filteredProducts = products.filter((p) => {
@@ -931,7 +1018,31 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
               </h3>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              {/* Tombol Promo & Diskon (PRD F6.4) */}
+              <button
+                type="button"
+                onClick={() => setIsPromoModalOpen(true)}
+                className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="Kelola Program Diskon & Promo Otomatis"
+              >
+                <Gift className="w-3 h-3 text-amber-600" />
+                <span>Promo {activePromotions.length > 0 ? `(${activePromotions.length})` : ""}</span>
+              </button>
+
+              {/* Tombol Retur & Void (PRD F6.1 & F6.2) */}
+              {onOpenVoidReturnModal && (
+                <button
+                  type="button"
+                  onClick={onOpenVoidReturnModal}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                  title="Retur Barang & Pembatalan (Void) Nota (PRD F6.1 - F6.2)"
+                >
+                  <Shield className="w-3 h-3 text-rose-600" />
+                  <span>Retur/Void</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
@@ -941,14 +1052,14 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                     timestamp: Date.now(),
                   });
                 }}
-                className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-slate-100 hover:bg-amber-100 text-slate-600 hover:text-amber-800 border border-slate-200 hover:border-amber-300 transition cursor-pointer flex items-center gap-1"
+                className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-slate-100 hover:bg-amber-100 text-slate-600 hover:text-amber-800 border border-slate-200 hover:border-amber-300 transition cursor-pointer flex items-center gap-1"
                 title="Paksa layar pelanggan menampilkan Belum Ada Transaksi"
               >
                 <RotateCcw className="w-3 h-3 text-slate-400 hover:text-amber-600" />
-                <span>Standby Layar</span>
+                <span>Standby</span>
               </button>
 
-              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-900 text-white font-mono">
+              <span className="px-2 py-1 rounded-full text-xs font-bold bg-slate-900 text-white font-mono">
                 {cart.reduce((total, it) => total + it.qty, 0)} Item
               </span>
 
@@ -992,13 +1103,12 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
             {selectedCustomer && (
               <div className="flex items-center gap-1 shrink-0">
                 <span
-                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
-                    selectedCustomer.customerGroup === "reseller"
-                      ? "bg-purple-100 text-purple-800 border border-purple-300"
-                      : selectedCustomer.customerGroup === "langganan"
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider ${selectedCustomer.customerGroup === "reseller"
+                    ? "bg-purple-100 text-purple-800 border border-purple-300"
+                    : selectedCustomer.customerGroup === "langganan"
                       ? "bg-blue-100 text-blue-800 border border-blue-300"
                       : "bg-slate-200 text-slate-700"
-                  }`}
+                    }`}
                 >
                   {selectedCustomer.customerGroup || "Umum"}
                 </span>
@@ -1065,10 +1175,10 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                 const currentUnit = availableUnits.find((u) => u.id === item.unitId);
                 const upsell = currentUnit
                   ? getNextTierUpsell({
-                      unit: currentUnit,
-                      qty: item.qty,
-                      customerGroup: activeCustomerGroup,
-                    })
+                    unit: currentUnit,
+                    qty: item.qty,
+                    customerGroup: activeCustomerGroup,
+                  })
                   : null;
 
                 return (
@@ -1106,14 +1216,41 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                       </div>
 
                       <div className="text-right shrink-0">
-                        <span className="font-mono font-bold text-sm text-slate-900 block">
-                          Rp {(item.price * item.qty).toLocaleString("id-ID")}
-                        </span>
-                        {item.isWholesalePrice && item.basePrice && item.basePrice > item.price && (
-                          <span className="text-[10px] font-semibold text-emerald-600 font-mono block">
-                            Hemat Rp {((item.basePrice - item.price) * item.qty).toLocaleString("id-ID")}
-                          </span>
-                        )}
+                        {/* Subtotal Item dengan Potongan Diskon / Promo (PRD F6.3 & F6.4) */}
+                        {(() => {
+                          const promoInfo = promoResult.itemDiscounts.get(item.id);
+                          const manualDisc = item.discountAmount || 0;
+                          const promoDisc = promoInfo?.discountAmount || 0;
+                          const totalLineDisc = manualDisc + promoDisc;
+                          const originalLineSubtotal = item.price * item.qty;
+                          const netLineSubtotal = Math.max(0, originalLineSubtotal - totalLineDisc);
+
+                          return (
+                            <>
+                              {totalLineDisc > 0 ? (
+                                <div>
+                                  <span className="line-through text-slate-400 font-mono text-[11px] block">
+                                    Rp {originalLineSubtotal.toLocaleString("id-ID")}
+                                  </span>
+                                  <span className="font-mono font-bold text-sm text-indigo-700 block">
+                                    Rp {netLineSubtotal.toLocaleString("id-ID")}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="font-mono font-bold text-sm text-slate-900 block">
+                                  Rp {originalLineSubtotal.toLocaleString("id-ID")}
+                                </span>
+                              )}
+
+                              {item.isWholesalePrice && item.basePrice && item.basePrice > item.price && (
+                                <span className="text-[10px] font-semibold text-emerald-600 font-mono block">
+                                  Hemat Rp {((item.basePrice - item.price) * item.qty).toLocaleString("id-ID")}
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
+
                         <button
                           onClick={() => removeFromCart(item.id)}
                           className="text-slate-400 hover:text-rose-600 mt-0.5 transition cursor-pointer p-0.5"
@@ -1170,6 +1307,93 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
                       </div>
                     </div>
 
+                    {/* Baris Diskon Manual & Promo Otomatis (PRD F6.3 & F6.4) */}
+                    <div className="mt-1 flex items-center justify-between gap-1 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Tombol Beri / Edit Diskon Manual */}
+                        {item.discountAmount && item.discountAmount > 0 ? (
+                          <div className="inline-flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-800 text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                            <Tag className="w-2.5 h-2.5 text-indigo-600" />
+                            <span
+                              onClick={() => {
+                                setManualDiscountModalState({
+                                  isOpen: true,
+                                  targetType: "item",
+                                  cartItemId: item.id,
+                                  originalPrice: item.price * item.qty,
+                                  unitPrice: item.price,
+                                  qty: item.qty,
+                                  costPrice: item.costPrice,
+                                  title: `${item.productName} (${item.qty} ${item.unitName})`,
+                                });
+                              }}
+                              className="cursor-pointer hover:underline"
+                            >
+                              Diskon: -Rp {item.discountAmount.toLocaleString("id-ID")}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCart((prev) =>
+                                  prev.map((c) =>
+                                    c.id === item.id
+                                      ? {
+                                        ...c,
+                                        discountAmount: 0,
+                                        discountType: undefined,
+                                        discountValue: undefined,
+                                        discountNote: undefined,
+                                        isManualDiscount: false,
+                                      }
+                                      : c
+                                  )
+                                );
+                              }}
+                              className="text-indigo-400 hover:text-rose-600 ml-0.5 cursor-pointer font-bold"
+                              title="Hapus Diskon Manual"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualDiscountModalState({
+                                isOpen: true,
+                                targetType: "item",
+                                cartItemId: item.id,
+                                originalPrice: item.price * item.qty,
+                                unitPrice: item.price,
+                                qty: item.qty,
+                                costPrice: item.costPrice,
+                                title: `${item.productName} (${item.qty} ${item.unitName})`,
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400 hover:text-indigo-700 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 px-1.5 py-0.5 rounded transition cursor-pointer"
+                            title="Beri Diskon Manual (PRD F6.3)"
+                          >
+                            <Tag className="w-2.5 h-2.5" />
+                            <span>+ Diskon</span>
+                          </button>
+                        )}
+
+                        {/* Badge Promo Otomatis */}
+                        {(() => {
+                          const promoInfo = promoResult.itemDiscounts.get(item.id);
+                          if (promoInfo && promoInfo.discountAmount > 0) {
+                            return (
+                              <div className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-900 text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                                <Sparkles className="w-2.5 h-2.5 text-amber-600" />
+                                <span>🎉 {promoInfo.promoName}: -Rp {promoInfo.discountAmount.toLocaleString("id-ID")}</span>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    </div>
+
                     {/* Rekomendasi Upsell Tier Berikutnya (PRD F3.3) */}
                     {upsell && (
                       <div className="mt-1.5 p-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-center justify-between gap-1.5">
@@ -1194,30 +1418,73 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
           </div>
 
           {/* 3. Seksi Pembayaran & Checkout (Sticky di Bagian Bawah) */}
-          <div className="pt-3.5 border-t border-slate-100 space-y-3 shrink-0">
+          <div className="pt-3.5 border-t border-slate-100 space-y-2.5 shrink-0">
+            {/* Rincian Subtotal & Potongan Diskon (PRD F6.3) */}
+            <div className="space-y-1 text-xs">
+              <div className="flex items-center justify-between text-slate-500">
+                <span>Subtotal ({cart.reduce((s, it) => s + it.qty, 0)} item):</span>
+                <span className="font-mono font-medium">Rp {cartSubtotal.toLocaleString("id-ID")}</span>
+              </div>
+
+              {totalItemDiscounts > 0 && (
+                <div className="flex items-center justify-between text-rose-600 font-medium">
+                  <span>Potongan Diskon Item & Promo:</span>
+                  <span className="font-mono">- Rp {totalItemDiscounts.toLocaleString("id-ID")}</span>
+                </div>
+              )}
+
+              {/* Diskon Transaksi (Nota) (PRD F6.3) */}
+              <div className="flex items-center justify-between">
+                {transactionDiscount ? (
+                  <div className="flex items-center gap-1 text-indigo-700 font-bold">
+                    <span>Diskon Nota ({transactionDiscount.reason || "Diskon Khusus"}):</span>
+                    <button
+                      type="button"
+                      onClick={() => setTransactionDiscount(null)}
+                      className="text-slate-400 hover:text-rose-600 cursor-pointer text-xs font-bold"
+                      title="Hapus Diskon Nota"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualDiscountModalState({
+                        isOpen: true,
+                        targetType: "transaction",
+                        originalPrice: Math.max(0, cartSubtotal - totalItemDiscounts),
+                        title: `Diskon Nota (${currentInvoiceCode})`,
+                      });
+                    }}
+                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Tag className="w-3 h-3" />
+                    <span>+ Tambah Diskon Nota</span>
+                  </button>
+                )}
+
+                {effectiveTrxDiscount > 0 && (
+                  <span className="font-mono font-bold text-indigo-700">
+                    - Rp {effectiveTrxDiscount.toLocaleString("id-ID")}
+                  </span>
+                )}
+              </div>
+            </div>
+
             {/* Display Total Belanja Utama */}
-            <div className="flex items-baseline justify-between">
+            <div className="flex items-baseline justify-between pt-1 border-t border-slate-200">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">
                   Total Tagihan:
                 </span>
-                {(() => {
-                  const totalSavings = cart.reduce((sum, item) => {
-                    if (item.isWholesalePrice && item.basePrice && item.basePrice > item.price) {
-                      return sum + (item.basePrice - item.price) * item.qty;
-                    }
-                    return sum;
-                  }, 0);
-                  if (totalSavings > 0) {
-                    return (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded mt-0.5">
-                        <Tag className="w-2.5 h-2.5" />
-                        Hemat Grosir: Rp {totalSavings.toLocaleString("id-ID")}
-                      </span>
-                    );
-                  }
-                  return null;
-                })()}
+                {totalSavings > 0 && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded mt-0.5">
+                    <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                    Total Hemat: Rp {totalSavings.toLocaleString("id-ID")}
+                  </span>
+                )}
               </div>
               <span className="font-mono text-3xl font-black text-slate-900 tracking-tight">
                 Rp {grandTotal.toLocaleString("id-ID")}
@@ -1828,6 +2095,54 @@ export const KasirPOS: React.FC<KasirPOSProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Program Promo Otomatis (PRD F6.4) */}
+      <PromoModal
+        isOpen={isPromoModalOpen}
+        onClose={() => setIsPromoModalOpen(false)}
+        products={products}
+        onPromoUpdated={loadActivePromos}
+      />
+
+      {/* Modal Diskon Manual Item & Transaksi (PRD F6.3) */}
+      <ManualDiscountModal
+        isOpen={manualDiscountModalState.isOpen}
+        onClose={() =>
+          setManualDiscountModalState((prev) => ({ ...prev, isOpen: false }))
+        }
+        targetType={manualDiscountModalState.targetType}
+        title={manualDiscountModalState.title}
+        originalPrice={manualDiscountModalState.originalPrice}
+        unitPrice={manualDiscountModalState.unitPrice}
+        qty={manualDiscountModalState.qty}
+        costPrice={manualDiscountModalState.costPrice}
+        maxCashierPercent={10}
+        onApplyDiscount={(result) => {
+          if (manualDiscountModalState.targetType === "item" && manualDiscountModalState.cartItemId) {
+            setCart((prev) =>
+              prev.map((c) =>
+                c.id === manualDiscountModalState.cartItemId
+                  ? {
+                    ...c,
+                    discountAmount: result.discountAmount,
+                    discountType: result.discountType,
+                    discountValue: result.discountValue,
+                    discountNote: result.reason || "Diskon Manual",
+                    isManualDiscount: true,
+                  }
+                  : c
+              )
+            );
+          } else {
+            setTransactionDiscount({
+              amount: result.discountAmount,
+              type: result.discountType,
+              value: result.discountValue,
+              reason: result.reason || "Diskon Transaksi",
+            });
+          }
+        }}
+      />
     </div>
   );
 };

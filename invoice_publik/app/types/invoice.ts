@@ -6,6 +6,7 @@ export interface PublicInvoiceItem {
   quantity: number;
   price: number;
   subtotal: number;
+  discountAmount?: number;
 }
 
 export interface PublicInvoice {
@@ -24,6 +25,9 @@ export interface PublicInvoice {
   expiresAt?: string;
   remainingMinutes?: number;
   isExpired?: boolean;
+  isVoid?: boolean;
+  discountAmount?: number;
+  promoName?: string;
 }
 
 export interface InvoiceQueryResult {

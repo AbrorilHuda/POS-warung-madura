@@ -12,6 +12,7 @@ import {
   generateWhatsAppReminderUrl,
 } from "../services/customer.server";
 import { getStoreConfig } from "../services/pos.server";
+import { createAuditLog } from "../services/shift.server";
 
 /**
  * GET /api/customers — Pencarian pelanggan, rincian piutang, dan buku besar (ledger)
@@ -118,10 +119,28 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json({ ok: true, result });
     }
 
-    // 5. Verifikasi PIN Pemilik untuk Kasbon Over-Limit (PRD F1.7)
+    // 5. Verifikasi PIN Pemilik untuk Kasbon Over-Limit (PRD F1.7 & F5.6)
     if (actionType === "verifyPin") {
       const pin = body.pin || "";
       const valid = await verifyOwnerPin(pin);
+      if (valid) {
+        const custInfo = body.customerName ? ` untuk pelanggan ${body.customerName}` : "";
+        await createAuditLog(
+          "SUPERVISOR_OVERRIDE_CREDIT_LIMIT",
+          "customer",
+          body.customerId || null,
+          `Otorisasi PIN Pemilik disetujui: Izin transaksi kasbon melampaui limit kredit${custInfo}`,
+          body.cashierName || "Kasir"
+        );
+      } else {
+        await createAuditLog(
+          "SUPERVISOR_OVERRIDE_FAILED",
+          "customer",
+          body.customerId || null,
+          `Percobaan otorisasi PIN Pemilik gagal (PIN salah) untuk limit kasbon`,
+          body.cashierName || "Kasir"
+        );
+      }
       return Response.json({ ok: true, valid });
     }
 

@@ -38,6 +38,37 @@ export interface Product {
   minStockAlert?: number;
 }
 
+export type PromoType = 'product_discount' | 'buy_x_get_y' | 'bundle';
+
+export interface Promotion {
+  id: string;
+  name: string;
+  description?: string;
+  promoType: PromoType;
+  isActive: boolean;
+  startDate: string;
+  endDate: string;
+  productId?: string;
+  productName?: string;
+  unitId?: string;
+  minQty?: number;
+  discountType?: 'percentage' | 'fixed_amount';
+  discountValue?: number;
+  buyProductId?: string;
+  buyProductName?: string;
+  buyUnitId?: string;
+  buyQty?: number;
+  getProductId?: string;
+  getProductName?: string;
+  getUnitId?: string;
+  getQty?: number;
+  getDiscountPercent?: number;
+  bundlePrice?: number;
+  bundleItems?: Array<{ productId: string; unitId?: string; qty: number; productName?: string }>;
+  priority?: number;
+  createdAt?: string;
+}
+
 export interface CartItem {
   id: string; // unique cart line id
   productId: string;
@@ -52,6 +83,16 @@ export interface CartItem {
   costPrice?: number;
   appliedTierName?: string; // e.g. "Grosir (Min 12)" atau "Reseller"
   isWholesalePrice?: boolean;
+  // PRD F6.3: Diskon Manual per Item
+  discountAmount?: number; // total potongan diskon per baris item
+  discountType?: 'percentage' | 'fixed_amount';
+  discountValue?: number; // nilai persentase atau nominal input
+  discountNote?: string;
+  isManualDiscount?: boolean;
+  // PRD F6.4: Promo Otomatis
+  promoDiscountAmount?: number;
+  promoName?: string;
+  promoId?: string;
 }
 
 export interface SaleItemSnapshot {
@@ -66,6 +107,9 @@ export interface SaleItemSnapshot {
   basePrice?: number;
   appliedTierName?: string;
   isWholesalePrice?: boolean;
+  discountAmount?: number;
+  discountType?: string;
+  discountNote?: string;
 }
 
 
@@ -85,7 +129,12 @@ export interface Sale {
   }>;
   isVoid?: boolean;
   voidReason?: string;
+  voidedAt?: string;
+  voidedBy?: string;
   discountAmount?: number;
+  discountType?: string;
+  discountReason?: string;
+  promoName?: string;
   customerId?: string;
   customerName?: string;
   customerDebtRemaining?: number;
@@ -345,4 +394,56 @@ export interface AuditLogItem {
   details: string | null;
   createdAt: string;
 }
+
+// ==========================================
+// F8. Supplier & Kulakan Lanjutan Interfaces
+// ==========================================
+
+export interface Supplier {
+  id: string;
+  name: string;
+  phone?: string | null;
+  address?: string | null;
+  defaultPaymentTermDays: number; // e.g. 0 = Tunai, 7, 14, 30
+  notes?: string | null;
+  isActive: boolean;
+  totalDebt?: number; // Akumulasi utang kulakan yang belum lunas
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PurchaseItemInput {
+  productId: string;
+  productName: string;
+  unitId: string;
+  unitName: string;
+  quantity: number;
+  conversionRatio: number;
+  costPrice: number; // Harga beli per satuan yang dipilih
+  subtotal: number;
+  batchNo?: string;
+  expiryDate?: string | null;
+}
+
+export interface PurchaseRecord {
+  id: string;
+  invoiceNumber: string;
+  supplierId: string;
+  supplierName: string;
+  purchaseDate: string;
+  subtotal: number;
+  discount: number;
+  shippingCost: number;
+  totalAmount: number;
+  paidAmount: number;
+  remainingDebt: number;
+  paymentMethod: "Tunai" | "Transfer" | "Utang";
+  paymentStatus: "paid" | "partial" | "unpaid";
+  dueDate?: string | null;
+  notes?: string | null;
+  createdBy?: string;
+  items: PurchaseItemInput[];
+  createdAt?: string;
+}
+
 

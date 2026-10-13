@@ -390,6 +390,116 @@ async function refreshDatabase() {
       ) ENGINE=InnoDB;
     `);
 
+    // Tabel promotions (PRD F6.4 Promo Otomatis)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS promotions (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        description TEXT NULL,
+        promo_type VARCHAR(50) NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        start_date DATETIME NOT NULL,
+        end_date DATETIME NOT NULL,
+        product_id VARCHAR(36) NULL,
+        unit_id VARCHAR(36) NULL,
+        min_qty DECIMAL(12, 4) DEFAULT 1,
+        discount_type VARCHAR(50) DEFAULT 'percentage',
+        discount_value DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        buy_product_id VARCHAR(36) NULL,
+        buy_unit_id VARCHAR(36) NULL,
+        buy_qty DECIMAL(12, 4) DEFAULT 1,
+        get_product_id VARCHAR(36) NULL,
+        get_unit_id VARCHAR(36) NULL,
+        get_qty DECIMAL(12, 4) DEFAULT 1,
+        get_discount_percent DECIMAL(5, 2) DEFAULT 100,
+        bundle_price DECIMAL(14, 2) NULL,
+        bundle_items TEXT NULL,
+        priority INT DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_promo_active (is_active, start_date, end_date)
+      ) ENGINE=InnoDB;
+    `);
+
+    // Tabel suppliers (PRD F8.1 Master Supplier)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS suppliers (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        phone VARCHAR(50) NULL,
+        address TEXT NULL,
+        default_payment_term_days INT NOT NULL DEFAULT 0,
+        notes TEXT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_supplier_name (name)
+      ) ENGINE=InnoDB;
+    `);
+
+    // Tabel purchases & purchase_items (PRD F8.2 & F8.3 Pencatatan Kulakan Terstruktur)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS purchases (
+        id VARCHAR(36) PRIMARY KEY,
+        invoice_number VARCHAR(100) NOT NULL,
+        supplier_id VARCHAR(36) NOT NULL,
+        supplier_name VARCHAR(150) NOT NULL,
+        purchase_date DATETIME NOT NULL,
+        subtotal DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        discount DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        shipping_cost DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        total_amount DECIMAL(14, 2) NOT NULL,
+        paid_amount DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        payment_method ENUM('Tunai', 'Transfer', 'Utang') DEFAULT 'Tunai',
+        payment_status ENUM('paid', 'partial', 'unpaid') DEFAULT 'paid',
+        due_date DATE NULL,
+        notes TEXT NULL,
+        created_by VARCHAR(100) DEFAULT 'Kasir',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_purchases_supplier (supplier_id),
+        INDEX idx_purchases_invoice (invoice_number),
+        INDEX idx_purchases_status (payment_status),
+        INDEX idx_purchases_date (purchase_date)
+      ) ENGINE=InnoDB;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS purchase_items (
+        id VARCHAR(36) PRIMARY KEY,
+        purchase_id VARCHAR(36) NOT NULL,
+        product_id VARCHAR(36) NOT NULL,
+        product_name VARCHAR(255) NOT NULL,
+        unit_id VARCHAR(36) NOT NULL,
+        unit_name VARCHAR(50) NOT NULL,
+        quantity DECIMAL(12, 4) NOT NULL,
+        conversion_ratio DECIMAL(12, 4) NOT NULL DEFAULT 1,
+        cost_price DECIMAL(14, 2) NOT NULL,
+        subtotal DECIMAL(14, 2) NOT NULL,
+        batch_no VARCHAR(100) NULL,
+        expiry_date DATE NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pi_purchase (purchase_id),
+        INDEX idx_pi_product (product_id)
+      ) ENGINE=InnoDB;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS supplier_payments (
+        id VARCHAR(36) PRIMARY KEY,
+        purchase_id VARCHAR(36) NULL,
+        supplier_id VARCHAR(36) NOT NULL,
+        amount DECIMAL(14, 2) NOT NULL,
+        payment_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        payment_method ENUM('Tunai', 'Transfer') DEFAULT 'Tunai',
+        notes TEXT NULL,
+        created_by VARCHAR(100) DEFAULT 'Kasir',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_sp_supplier (supplier_id),
+        INDEX idx_sp_purchase (purchase_id)
+      ) ENGINE=InnoDB;
+    `);
+
     // Tabel receivables & receivable_payments (F1)
     await connection.query(`
       CREATE TABLE IF NOT EXISTS receivables (
@@ -517,6 +627,15 @@ async function refreshDatabase() {
           ADD COLUMN discount_type VARCHAR(50) NULL AFTER discount_amount;
         `);
       }
+
+      const [colDiscReason] = await connection.query("SHOW COLUMNS FROM sales LIKE 'discount_reason'");
+      if (colDiscReason.length === 0) {
+        await connection.query(`
+          ALTER TABLE sales
+          ADD COLUMN discount_reason VARCHAR(255) NULL AFTER discount_type,
+          ADD COLUMN promo_name VARCHAR(150) NULL AFTER discount_reason;
+        `);
+      }
     } catch { }
 
     try {
@@ -524,6 +643,24 @@ async function refreshDatabase() {
       if (atnCols.length === 0) {
         await connection.query("ALTER TABLE sale_items ADD COLUMN applied_tier_name VARCHAR(100) NULL AFTER subtotal;");
       }
+
+      const [colSiDisc] = await connection.query("SHOW COLUMNS FROM sale_items LIKE 'discount_amount'");
+      if (colSiDisc.length === 0) {
+        await connection.query(`
+          ALTER TABLE sale_items
+          ADD COLUMN discount_amount DECIMAL(14, 2) DEFAULT 0 AFTER subtotal,
+          ADD COLUMN discount_type VARCHAR(50) NULL AFTER discount_amount,
+          ADD COLUMN discount_note VARCHAR(150) NULL AFTER discount_type;
+        `);
+      }
+    } catch { }
+
+    try {
+      await connection.query(`
+        INSERT INTO store_settings (setting_key, setting_value) VALUES
+          ('cashier_max_discount_percent', '10')
+        ON DUPLICATE KEY UPDATE setting_value = setting_value;
+      `);
     } catch { }
 
     try {
@@ -556,7 +693,7 @@ async function refreshDatabase() {
     const truncateTables = [
       "sale_items", "sales", "sale_payments", "sale_return_items", "sale_returns",
       "stock_opname_items", "stock_opnames", "shift_cash_movements", "cashier_shifts",
-      "audit_logs", "receivables", "receivable_payments"
+      "audit_logs", "receivables", "receivable_payments", "promotions"
     ];
     for (const tbl of truncateTables) {
       try {

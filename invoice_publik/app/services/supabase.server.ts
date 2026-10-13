@@ -298,6 +298,9 @@ export async function queryInvoiceWithStatus(invoiceCode: string): Promise<Invoi
             expiresAt: new Date(expiresTime).toISOString(),
             remainingMinutes,
             isExpired: false,
+            isVoid: Boolean(invData.is_void),
+            discountAmount: Number(invData.discount_amount || 0),
+            promoName: invData.promo_name || undefined,
           },
           status: "found",
           retentionHours,
@@ -391,6 +394,7 @@ export async function saveInvoiceSnapshot(
     quantity: Number(it.qty ?? it.quantity ?? 1),
     price: Number(it.price || 0),
     subtotal: Number(it.subtotal || 0),
+    discountAmount: Number(it.discountAmount || 0),
   }));
 
   const invoiceObj: PublicInvoice = {
@@ -405,6 +409,9 @@ export async function saveInvoiceSnapshot(
     createdAt,
     items: mockItemObjects,
     isDemoMock: !client,
+    isVoid: (data as any).isVoid,
+    discountAmount: (data as any).discountAmount,
+    promoName: (data as any).promoName,
   };
 
   mockInvoices.set(invoiceId, invoiceObj);

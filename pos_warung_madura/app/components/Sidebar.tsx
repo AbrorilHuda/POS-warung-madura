@@ -19,6 +19,7 @@ import {
   Printer,
   Shield,
   RotateCcw,
+  FileSpreadsheet,
 } from "lucide-react";
 import type { StoreConfig, CloudTenantInfo } from "../services/pos.server";
 import { CloudSaasModal } from "./CloudSaasModal";
@@ -42,6 +43,7 @@ interface SidebarProps {
   onOpenShiftModal?: () => void;
   activeShiftName?: string | null;
   onOpenVoidReturnModal?: () => void;
+  onOpenImportExportModal?: (tab?: "import_products" | "import_customers" | "export_data") => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -61,6 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenShiftModal,
   activeShiftName,
   onOpenVoidReturnModal,
+  onOpenImportExportModal,
 }) => {
   const [time, setTime] = useState<string>("");
   const [isSaasModalOpen, setIsSaasModalOpen] = useState(false);
@@ -224,6 +227,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
             MySQL
           </span>
         </button>
+
+        {/* Import & Ekspor Data Excel/CSV Button (PRD F10) */}
+        {onOpenImportExportModal && (
+          <button
+            onClick={() => onOpenImportExportModal("export_data")}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold transition cursor-pointer shadow-2xs"
+            title="Import & Ekspor Data Excel/CSV (Produk, Pelanggan, Kasbon, Stok)"
+          >
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Import & Ekspor</span>
+            </div>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+              CSV/Excel
+            </span>
+          </button>
+        )}
 
         {/* Sync Status Button with Info Trigger */}
         <div className="flex items-center gap-1.5">

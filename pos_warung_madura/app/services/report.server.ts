@@ -18,6 +18,9 @@ export interface FinancialSummary {
   totalCostOfGoodsSold: number;   // Total HPP
   grossProfit: number;            // Laba Kotor (Omzet - HPP)
   grossMarginPercent: number;     // Margin (%)
+  totalDiscounts: number;         // Total Diskon & Promo (PRD F6.5)
+  totalReturns: number;           // Total Nilai Retur Penjualan (PRD F6.5)
+  voidTransactionsCount: number;  // Jumlah Transaksi Dibatalkan (VOID)
   totalCashSales: number;         // Penerimaan Tunai Langsung
   totalQrisSales: number;         // Penerimaan QRIS
   totalDebtSales: number;         // Kasbon Baru Terbit
@@ -69,6 +72,9 @@ export interface DetailedSaleReportRow {
   totalCogs: number;
   grossProfit: number;
   itemCount: number;
+  isVoid?: boolean;
+  discountAmount?: number;
+  promoName?: string;
 }
 
 /**
@@ -209,6 +215,34 @@ export async function getFinancialSummary(filter: ReportFilter): Promise<Financi
   const totalInventoryAssetValue = Number(stockInvRows[0]?.total_inventory_value || 0);
   const lowStockCount = Number(stockInvRows[0]?.low_stock_count || 0);
 
+  // 6. Query Diskon, Retur, dan Transaksi Void (PRD F6.5)
+  const discQuery = `
+    SELECT COALESCE(SUM(s.discount_amount), 0) AS total_discount
+    FROM sales s
+    WHERE s.created_at BETWEEN ? AND ? AND (s.is_void IS NULL OR s.is_void = FALSE)
+  `;
+  const discRows = await query<RowDataPacket[]>(discQuery, [start, end]);
+  const totalDiscounts = Number(discRows[0]?.total_discount || 0);
+
+  let totalReturns = 0;
+  try {
+    const retQuery = `
+      SELECT COALESCE(SUM(total_refund_amount), 0) AS total_ret
+      FROM sale_returns
+      WHERE created_at BETWEEN ? AND ?
+    `;
+    const retRows = await query<RowDataPacket[]>(retQuery, [start, end]);
+    totalReturns = Number(retRows[0]?.total_ret || 0);
+  } catch {}
+
+  const voidQuery = `
+    SELECT COUNT(*) AS void_count
+    FROM sales
+    WHERE created_at BETWEEN ? AND ? AND is_void = TRUE
+  `;
+  const voidRows = await query<RowDataPacket[]>(voidQuery, [start, end]);
+  const voidTransactionsCount = Number(voidRows[0]?.void_count || 0);
+
   // Kalkulasi Keuangan
   const totalRevenue = Number(salesAgg.total_revenue || 0);
   const totalTransactions = Number(salesAgg.total_transactions || 0);
@@ -233,6 +267,9 @@ export async function getFinancialSummary(filter: ReportFilter): Promise<Financi
     totalCostOfGoodsSold: totalCogs,
     grossProfit,
     grossMarginPercent,
+    totalDiscounts,
+    totalReturns,
+    voidTransactionsCount,
     totalCashSales,
     totalQrisSales,
     totalDebtSales,
@@ -397,8 +434,7 @@ export async function getDetailedSalesReport(
   await ensureDatabaseSchema();
   const { start, end } = resolveDateRange(filter);
   const conditions: string[] = [
-    "s.created_at BETWEEN ? AND ?",
-    "(s.is_void IS NULL OR s.is_void = FALSE)"
+    "s.created_at BETWEEN ? AND ?"
   ];
   const params: any[] = [start, end];
 
@@ -417,6 +453,9 @@ export async function getDetailedSalesReport(
       COALESCE(s.customer_name, c.name, 'Pelanggan Umum') AS customer_name,
       s.payment_method,
       s.total_amount,
+      COALESCE(s.is_void, FALSE) AS is_void,
+      COALESCE(s.discount_amount, 0) AS discount_amount,
+      s.promo_name,
       COUNT(si.id) AS item_count,
       SUM(COALESCE(si.cost_price, pu.cost_price, si.price * 0.8) * si.quantity) AS total_cogs
     FROM sales s
@@ -424,7 +463,7 @@ export async function getDetailedSalesReport(
     LEFT JOIN sale_items si ON s.id = si.sale_id
     LEFT JOIN product_units pu ON si.product_unit_id = pu.id
     WHERE ${whereClause}
-    GROUP BY s.id, s.invoice_code, s.created_at, s.cashier_name, s.customer_name, c.name, s.payment_method, s.total_amount
+    GROUP BY s.id, s.invoice_code, s.created_at, s.cashier_name, s.customer_name, c.name, s.payment_method, s.total_amount, s.is_void, s.discount_amount, s.promo_name
     ORDER BY s.created_at DESC
     LIMIT ?
   `;
@@ -436,6 +475,9 @@ export async function getDetailedSalesReport(
   return rows.map((r) => {
     const totalAmount = Number(r.total_amount || 0);
     const totalCogs = Number(r.total_cogs || 0);
+    const isVoid = Boolean(r.is_void);
+    const discountAmount = Number(r.discount_amount || 0);
+    const promoName = r.promo_name ? String(r.promo_name) : undefined;
     const dateFormatted =
       r.created_at instanceof Date
         ? r.created_at.toLocaleString("id-ID")
@@ -449,8 +491,11 @@ export async function getDetailedSalesReport(
       paymentMethod: String(r.payment_method || "Tunai"),
       totalAmount,
       totalCogs: Math.round(totalCogs),
-      grossProfit: Math.round(totalAmount - totalCogs),
+      grossProfit: isVoid ? 0 : Math.round(totalAmount - totalCogs),
       itemCount: Number(r.item_count || 0),
+      isVoid,
+      discountAmount,
+      promoName,
     };
   });
 }
@@ -476,7 +521,10 @@ export async function generateFinancialCsv(filter: ReportFilter): Promise<string
   csv += `Total HPP (Harga Pokok),${summary.totalCostOfGoodsSold}\n`;
   csv += `Laba Kotor (Gross Profit),${summary.grossProfit}\n`;
   csv += `Margin Keuntungan (%),${summary.grossMarginPercent}%\n`;
-  csv += `Jumlah Transaksi,${summary.totalTransactions}\n`;
+  csv += `Total Diskon & Promo Diberikan,${summary.totalDiscounts}\n`;
+  csv += `Total Nilai Retur Penjualan,${summary.totalReturns}\n`;
+  csv += `Jumlah Transaksi Void (Batal),${summary.voidTransactionsCount}\n`;
+  csv += `Jumlah Transaksi Berhasil,${summary.totalTransactions}\n`;
   csv += `Rata-rata Transaksi (AOV),${summary.averageOrderValue}\n`;
   csv += `Penerimaan Tunai,${summary.totalCashSales}\n`;
   csv += `Penerimaan QRIS,${summary.totalQrisSales}\n`;
@@ -496,9 +544,11 @@ export async function generateFinancialCsv(filter: ReportFilter): Promise<string
   });
 
   csv += "\n--- RINCIAN TRANSAKSI NOTA PENJUALAN ---\n";
-  csv += "No Nota,Waktu,Kasir,Pelanggan,Metode Bayar,Omzet,HPP,Laba Kotor\n";
+  csv += "No Nota,Waktu,Kasir,Pelanggan,Metode Bayar,Status,Diskon/Promo,Omzet,HPP,Laba Kotor\n";
   detailedSales.forEach((s) => {
-    csv += `"${s.invoiceCode}","${s.timestamp}","${s.cashierName}","${s.customerName}","${s.paymentMethod}",${s.totalAmount},${s.totalCogs},${s.grossProfit}\n`;
+    const status = s.isVoid ? "VOID" : "BERHASIL";
+    const discStr = s.discountAmount ? `${s.discountAmount}${s.promoName ? ` (${s.promoName})` : ""}` : "0";
+    csv += `"${s.invoiceCode}","${s.timestamp}","${s.cashierName}","${s.customerName}","${s.paymentMethod}","${status}","${discStr}",${s.totalAmount},${s.totalCogs},${s.grossProfit}\n`;
   });
 
   return csv;

@@ -469,6 +469,172 @@ export async function ensureDatabaseSchema(): Promise<void> {
       console.warn("[Init stock batches warning]:", e.message);
     }
 
+    // 23. Tabel promotions (PRD F6.4 Promo Otomatis)
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS promotions (
+          id VARCHAR(36) PRIMARY KEY,
+          name VARCHAR(150) NOT NULL,
+          description TEXT NULL,
+          promo_type VARCHAR(50) NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          start_date DATETIME NOT NULL,
+          end_date DATETIME NOT NULL,
+          product_id VARCHAR(36) NULL,
+          unit_id VARCHAR(36) NULL,
+          min_qty DECIMAL(12, 4) DEFAULT 1,
+          discount_type VARCHAR(50) DEFAULT 'percentage',
+          discount_value DECIMAL(14, 2) NOT NULL DEFAULT 0,
+          buy_product_id VARCHAR(36) NULL,
+          buy_unit_id VARCHAR(36) NULL,
+          buy_qty DECIMAL(12, 4) DEFAULT 1,
+          get_product_id VARCHAR(36) NULL,
+          get_unit_id VARCHAR(36) NULL,
+          get_qty DECIMAL(12, 4) DEFAULT 1,
+          get_discount_percent DECIMAL(5, 2) DEFAULT 100,
+          bundle_price DECIMAL(14, 2) NULL,
+          bundle_items TEXT NULL,
+          priority INT DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_promo_active (is_active, start_date, end_date)
+        ) ENGINE=InnoDB;
+      `);
+    } catch (e: any) {
+      console.warn("[Create promotions table warning]:", e.message);
+    }
+
+    // 24. Kolom diskon pada sale_items dan sales (PRD F6.3 & F6.4)
+    try {
+      const [siDisc] = await pool.query<RowDataPacket[]>(
+        "SHOW COLUMNS FROM sale_items LIKE 'discount_amount'"
+      );
+      if (siDisc.length === 0) {
+        await pool.query(`
+          ALTER TABLE sale_items
+          ADD COLUMN discount_amount DECIMAL(14, 2) DEFAULT 0 AFTER subtotal,
+          ADD COLUMN discount_type VARCHAR(50) NULL AFTER discount_amount,
+          ADD COLUMN discount_note VARCHAR(150) NULL AFTER discount_type;
+        `);
+      }
+    } catch {}
+
+    try {
+      const [sReason] = await pool.query<RowDataPacket[]>(
+        "SHOW COLUMNS FROM sales LIKE 'discount_reason'"
+      );
+      if (sReason.length === 0) {
+        await pool.query(`
+          ALTER TABLE sales
+          ADD COLUMN discount_reason VARCHAR(255) NULL AFTER discount_type,
+          ADD COLUMN promo_name VARCHAR(150) NULL AFTER discount_reason;
+        `);
+      }
+    } catch {}
+
+    // 25. Batas diskon kasir di store_settings
+    try {
+      await pool.query(`
+        INSERT INTO store_settings (setting_key, setting_value) VALUES
+          ('cashier_max_discount_percent', '10')
+        ON DUPLICATE KEY UPDATE setting_value = setting_value;
+      `);
+    } catch {}
+
+    // 26. Tabel suppliers (PRD F8.1 Master Supplier)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS suppliers (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        phone VARCHAR(50) NULL,
+        address TEXT NULL,
+        default_payment_term_days INT NOT NULL DEFAULT 0,
+        notes TEXT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_supplier_name (name)
+      ) ENGINE=InnoDB;
+    `);
+
+    // Inisialisasi Supplier Default jika tabel masih kosong
+    try {
+      const [supCount] = await pool.query<RowDataPacket[]>("SELECT COUNT(*) AS cnt FROM suppliers");
+      if (supCount[0]?.cnt === 0) {
+        await pool.query(`
+          INSERT INTO suppliers (id, name, phone, address, default_payment_term_days, notes) VALUES
+          ('sup-01', 'Agen Grosir Sembako Madura', '081234567890', 'Pasar Induk Kramat Jati', 14, 'Supplier beras, minyak goreng, gula, dan telur'),
+          ('sup-02', 'Distributor Rokok Sejahtera', '081398765432', 'Jl. Pergudangan Blok B No. 8', 7, 'Sales resmi rokok Djarum, Sampoerna, Gudang Garam'),
+          ('sup-03', 'Grosir Sinar Terang', '081911223344', 'Ruko Sentra Blok A No. 12', 0, 'Minuman kemasan, mie instan, sabun & sampo'),
+          ('sup-04', 'Sales Wings & Mayora', '085712345678', 'Jl. Daan Mogot KM 12', 14, 'Snack, biskuit, kopi sachet, dan deterjen'),
+          ('sup-05', 'Agen Gas & Galon Berkah', '081299887766', 'Pangkalan Gas Madura', 0, 'Tabung Gas Elpiji 3kg & Galon Air Mineral');
+        `);
+      }
+    } catch {}
+
+    // 27. Tabel purchases & purchase_items (PRD F8.2 & F8.3 Pencatatan Kulakan Terstruktur)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS purchases (
+        id VARCHAR(36) PRIMARY KEY,
+        invoice_number VARCHAR(100) NOT NULL,
+        supplier_id VARCHAR(36) NOT NULL,
+        supplier_name VARCHAR(150) NOT NULL,
+        purchase_date DATETIME NOT NULL,
+        subtotal DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        discount DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        shipping_cost DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        total_amount DECIMAL(14, 2) NOT NULL,
+        paid_amount DECIMAL(14, 2) NOT NULL DEFAULT 0,
+        payment_method ENUM('Tunai', 'Transfer', 'Utang') DEFAULT 'Tunai',
+        payment_status ENUM('paid', 'partial', 'unpaid') DEFAULT 'paid',
+        due_date DATE NULL,
+        notes TEXT NULL,
+        created_by VARCHAR(100) DEFAULT 'Kasir',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_purchases_supplier (supplier_id),
+        INDEX idx_purchases_invoice (invoice_number),
+        INDEX idx_purchases_status (payment_status),
+        INDEX idx_purchases_date (purchase_date)
+      ) ENGINE=InnoDB;
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS purchase_items (
+        id VARCHAR(36) PRIMARY KEY,
+        purchase_id VARCHAR(36) NOT NULL,
+        product_id VARCHAR(36) NOT NULL,
+        product_name VARCHAR(255) NOT NULL,
+        unit_id VARCHAR(36) NOT NULL,
+        unit_name VARCHAR(50) NOT NULL,
+        quantity DECIMAL(12, 4) NOT NULL,
+        conversion_ratio DECIMAL(12, 4) NOT NULL DEFAULT 1,
+        cost_price DECIMAL(14, 2) NOT NULL,
+        subtotal DECIMAL(14, 2) NOT NULL,
+        batch_no VARCHAR(100) NULL,
+        expiry_date DATE NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pi_purchase (purchase_id),
+        INDEX idx_pi_product (product_id)
+      ) ENGINE=InnoDB;
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS supplier_payments (
+        id VARCHAR(36) PRIMARY KEY,
+        purchase_id VARCHAR(36) NULL,
+        supplier_id VARCHAR(36) NOT NULL,
+        amount DECIMAL(14, 2) NOT NULL,
+        payment_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        payment_method ENUM('Tunai', 'Transfer') DEFAULT 'Tunai',
+        notes TEXT NULL,
+        created_by VARCHAR(100) DEFAULT 'Kasir',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_sp_supplier (supplier_id),
+        INDEX idx_sp_purchase (purchase_id)
+      ) ENGINE=InnoDB;
+    `);
+
     isSchemaInitialized = true;
   } catch (err: any) {
     console.warn("[ensureDatabaseSchema warning]:", err.message);
