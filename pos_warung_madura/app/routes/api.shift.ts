@@ -20,6 +20,7 @@ import {
   switchActiveCashier,
   createAuditLog,
 } from "../services/shift.server";
+import { verifyTenantSecret } from "../services/pos.server";
 
 /**
  * GET /api/shift
@@ -213,6 +214,13 @@ export async function action({ request }: ActionFunctionArgs) {
         const res = await completeInitialSetup(body);
         const settings = await getShiftSecuritySettings();
         return Response.json({ ...res, settings });
+      }
+
+      case "verify_cloud_secret": {
+        const secret = String(body.secret_key || body.secretKey || "").trim();
+        const apiUrl = body.api_url ? String(body.api_url).trim() : undefined;
+        const res = await verifyTenantSecret(secret, apiUrl);
+        return Response.json(res);
       }
 
 

@@ -78,13 +78,13 @@ export const OnboardingSetupModal: React.FC<OnboardingSetupModalProps> = ({
     setCloudVerifiedMsg(null);
 
     try {
-      const formData = new FormData();
-      formData.append("intent", "verify_cloud_secret");
-      formData.append("secret_key", syncSecretInput.trim());
-
-      const res = await fetch("/", {
+      const res = await fetch("/api/shift", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "verify_cloud_secret",
+          secret_key: syncSecretInput.trim(),
+        }),
       });
 
       const data = await res.json();

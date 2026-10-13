@@ -1211,6 +1211,9 @@ export async function createProductWithUnits(product: Product): Promise<void> {
   }
 }
 
+export const DEFAULT_CLOUD_SYNC_URL = "https://pos-warungmadura.ainulhuda.my.id/api/sync";
+export const DEFAULT_CLOUD_BASE_URL = "https://pos-warungmadura.ainulhuda.my.id";
+
 export function getSyncSecretKey(): string {
   reloadEnv();
   return (process.env.SYNC_SECRET_KEY || "").trim();
@@ -1218,7 +1221,11 @@ export function getSyncSecretKey(): string {
 
 export function getSyncApiUrl(): string {
   reloadEnv();
-  return (process.env.PUBLIC_INVOICE_SYNC_URL || "http://127.0.0.1:5175/api/sync").trim();
+  const configured = (process.env.PUBLIC_INVOICE_SYNC_URL || "").trim();
+  if (configured && !configured.includes("5175")) {
+    return configured;
+  }
+  return DEFAULT_CLOUD_SYNC_URL;
 }
 
 export interface InstallationIdentity {
@@ -1384,6 +1391,9 @@ export async function testCloudConnection(): Promise<CloudStatusResult> {
   if (syncUrl.includes("5175") && envSync && !envSync.includes("5175")) {
     syncUrl = envSync;
   }
+  if (!syncUrl || syncUrl.includes("5175")) {
+    syncUrl = DEFAULT_CLOUD_SYNC_URL;
+  }
 
   try {
     const res = await fetch(syncUrl, {
@@ -1452,22 +1462,38 @@ export async function verifyTenantSecret(secretKey: string, apiUrl?: string): Pr
   const configuredUrl = getSyncApiUrl();
   let url = (apiUrl || "").trim();
 
-  // Jika URL yang diinput masih localhost:5175 tetapi env sudah diset URL cloud publik, prioritaskan URL cloud
-  if (!url || (url.includes("5175") && configuredUrl && !configuredUrl.includes("5175"))) {
-    url = configuredUrl;
+  // Jika URL tidak diisi atau menunjuk ke port 5175 / localhost, arahkan ke cloud URL
+  if (!url || url.includes("5175") || url.includes("localhost") || url.includes("127.0.0.1")) {
+    url = configuredUrl && !configuredUrl.includes("5175") ? configuredUrl : DEFAULT_CLOUD_SYNC_URL;
   }
   if (!url) {
-    url = "https://pos-warung-madura-theta.vercel.app/api/sync";
+    url = DEFAULT_CLOUD_SYNC_URL;
   }
 
-  try {
-    const res = await fetch(url, {
+  const tryFetch = async (targetUrl: string) => {
+    return await fetch(targetUrl, {
       method: "GET",
       headers: {
         "x-sync-secret": secretKey.trim(),
       },
       signal: AbortSignal.timeout(15000), // 15 detik agar tidak mudah timeout pada cold-start cloud
     });
+  };
+
+  try {
+    let res: Response;
+    let targetUsed = url;
+    try {
+      res = await tryFetch(url);
+    } catch (fetchErr: any) {
+      // Jika request ke url pertama gagal dan url bukan cloud URL default, coba fallback otomatis ke DEFAULT_CLOUD_SYNC_URL
+      if (url !== DEFAULT_CLOUD_SYNC_URL) {
+        targetUsed = DEFAULT_CLOUD_SYNC_URL;
+        res = await tryFetch(DEFAULT_CLOUD_SYNC_URL);
+      } else {
+        throw fetchErr;
+      }
+    }
 
     if (res.ok) {
       const data = await res.json();
@@ -1518,11 +1544,11 @@ export async function saveCloudConfig(input: UpdateCloudConfigInput): Promise<{
 
   const configuredUrl = getSyncApiUrl();
   let syncUrl = (input.syncApiUrl || "").trim();
-  if (!syncUrl || (syncUrl.includes("5175") && configuredUrl && !configuredUrl.includes("5175"))) {
-    syncUrl = configuredUrl;
+  if (!syncUrl || syncUrl.includes("5175")) {
+    syncUrl = configuredUrl && !configuredUrl.includes("5175") ? configuredUrl : DEFAULT_CLOUD_SYNC_URL;
   }
   if (!syncUrl) {
-    syncUrl = "https://pos-warung-madura-theta.vercel.app/api/sync";
+    syncUrl = DEFAULT_CLOUD_SYNC_URL;
   }
 
   // 1. Verifikasi secret key ke server SaaS & ambil profil toko lengkap

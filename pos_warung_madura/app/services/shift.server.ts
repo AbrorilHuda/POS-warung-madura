@@ -831,6 +831,20 @@ export async function completeInitialSetup(data: {
   if (storeAddress) updateEnvKey("STORE_ADDRESS", storeAddress);
   if (data.syncSecret?.trim()) updateEnvKey("SYNC_SECRET_KEY", data.syncSecret.trim());
 
+  if (data.syncSecret?.trim()) {
+    try {
+      const { saveCloudConfig } = await import("./pos.server");
+      await saveCloudConfig({
+        syncSecretKey: data.syncSecret.trim(),
+        storeName,
+        ownerName,
+        storeAddress,
+      });
+    } catch (e: any) {
+      console.warn("[completeInitialSetup] Gagal sync cloud config:", e?.message || e);
+    }
+  }
+
   try {
     fs.writeFileSync(envPath, content, "utf-8");
   } catch (err: any) {
