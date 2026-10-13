@@ -1,16 +1,11 @@
 # 🏪 POS Warung Madura Sistem Kasir Modern & Struk Digital Cloud
 
-Aplikasi Point of Sale (POS) modern khusus operasional warung madura dan retail minimarket, dirancang untuk berjalan secara **offline-first** di laptop/PC kasir menggunakan **Electron Desktop** dengan database **MySQL Portable terisolasi**, serta terintegrasi dengan **Layanan Struk Digital Cloud (Invoice Publik)** dan **Scanner Barcode Nirkabel Kamera HP**.
+Aplikasi Point of Sale (POS) modern khusus operasional warung madura dan ritel minimarket UMKM, dirancang untuk berjalan secara **offline-first** di laptop/PC kasir menggunakan **Electron Desktop** dengan database **MySQL Portable terisolasi**, serta terintegrasi dengan **Layanan Struk Digital Cloud (Invoice Publik)** dan **Scanner Barcode Nirkabel Kamera HP**.
 
-> [!WARNING]
-> 🚧 **Status Rilis: Early Access (Beta)**  
-> Aplikasi POS Warung Madura saat ini masih berada dalam tahap **pengembangan aktif (Early Access / Beta)** dan performa maupun beberapa fitur tertentu **masih belum sepenuhnya optimal**. Kami sangat menyarankan pengguna untuk melakukan pencadangan data (*backup*) secara berkala.
-> 
-> 💻 **Platform Didukung Saat Ini:** Dioptimalkan khusus untuk **Desktop Windows (Windows 10 / Windows 11 64-bit)** menggunakan Electron Desktop dan MySQL Portable mandiri. Dukungan untuk sistem operasi lain (Linux & macOS) sedang direncanakan — *kontribusi Anda sangat dinantikan!*
-
-> 📦 **Download Installer Aplikasi Windows (.exe):**  
-> Dapatkan file installer resmi siap pakai langsung tanpa perlu setup source code di:  
-> 👉 **[Download Rilis Terbaru di GitHub Releases](https://github.com/AbrorilHuda/POS-warung-madura/releases)**
+> [!NOTE]
+> 🏷️ **Versi Rilis Saat Ini:** `v3.1.0` (Desktop Windows 64-bit)  
+> 📦 **Ukuran Installer Ringan:** Berkas installer installer hanya berukuran **~113 MB** (terpangkas >800 MB berkat optimasi strip bloatware MySQL dan kompresi solid LZMA).  
+> 👉 **[Download Rilis Installer Windows (.exe) di GitHub Releases](https://github.com/AbrorilHuda/POS-warung-madura/releases)**
 
 ---
 
@@ -26,43 +21,67 @@ POS-warung-madura/
 
 | Folder | Deskripsi | Port Default |
 |---|---|---|
-| **`pos_warung_madura`** | Aplikasi Desktop Kasir Electron, manajemen stok, kulakan, antrian sinkronisasi offline, server lokal HTTPS/WSS. | `4000` (Prod) / `5174` (Dev) |
-| **`invoice_publik`** | Server web struk digital publik untuk pelanggan scan QR nota, terhubung ke database cloud Supabase dengan fitur auto-delete 12 jam. | `5175` |
+| **`pos_warung_madura`** | Aplikasi Desktop Kasir Electron, manajemen stok & FEFO, kulakan supplier, diskon/promo, import/export CSV, server lokal HTTPS/WSS. | `4000` (Prod) / `5174` (Dev) / `3307` (MySQL) |
+| **`invoice_publik`** | Server web struk digital publik untuk pembeli memindai QR nota, terhubung ke Supabase Cloud dengan fitur auto-delete 12 jam. | `5175` |
 
 ---
 
-## ⚡ Fitur Utama
+## ⚡ Fitur Utama Lengkap (PRD F1 – F10)
 
 - 💻 **Desktop Standalone (Windows .exe)**: Aplikasi desktop native Windows dibungkus Electron dengan zero-dependency runtime.
 - 🗄️ **Zero-Config Portable MySQL**: Menyalakan dan menginisialisasi MySQL lokal secara otomatis di port terisolasi `3307` tanpa perlu menginstal XAMPP/Laragon.
-- 📱 **Scanner Barcode Kamera HP Nirkabel (F12)**: Mengubah smartphone kasir menjadi scanner barcode nirkabel via WebSocket aman (`wss://`) dan HTTPS SSL self-signed.
-- 🏷️ **Multi-Satuan & Harga Bertingkat / Reseller (F3)**: Menjual eceran/batang, bungkus, slop, hingga dus kartonan dengan harga grosir bertingkat otomatis.
+- 📱 **Scanner Barcode Kamera HP Nirkabel (F12)**: Mengubah smartphone kasir menjadi scanner barcode nirkabel via WebSocket aman (`wss://`) dan HTTPS SSL internal.
+- 👥 **Buku Kasbon & Pelanggan (F1)**:
+  - Pencatatan buku besar utang/piutang pelanggan per transaksi.
+  - Limit kredit otomatis dan batas jatuh tempo piutang.
+  - Pelunasan utang terstruktur berbasis First-In First-Out (FIFO).
+  - Tautan penagihan WhatsApp otomatis 1-klik.
+- 📊 **Laporan Finansial, Omzet & Cetak PDF (F2)**:
+  - Perhitungan laba kotor & margin riil berbasis HPP (*Harga Pokok Penjualan*).
+  - Ringkasan arus kas masuk/keluar kasir dan filter fleksibel (per shift kasir, hari ini, 7 hari, bulan ini, atau custom range).
+  - Cetak laporan finansial ke struk thermal 58mm/80mm serta ekspor cetak PDF.
+- 🏷️ **Multi-Satuan & Harga Bertingkat / Reseller (F3)**:
+  - Menjual eceran/batang, bungkus, slop, hingga dus kartonan.
+  - Penetapan harga bertingkat otomatis berdasarkan kuantiti belanja (grosir/reseller).
+- 💳 **Pembayaran Non-Tunai & Customer Display (F4)**:
+  - Pembayaran QRIS Statis standee & split payment (kombinasi Tunai + Non-Tunai).
+  - Layar display pembeli (*Customer Display*) eksternal sinkron realtime via BroadcastChannel/WebSocket.
+- 🛡️ **Shift Kasir & Otorisasi Pemilik (F5)**:
+  - Buka/tutup shift kasir, rekapitulasi modal awal, dan penghitungan selisih kas fisik.
+  - Otorisasi PIN Pemilik (*Supervisor Override*) untuk aksi kritis kasir (diskon khusus melebihi limit, void nota, dsb.).
+  - Jejak rekam audit log aktivitas kasir yang tidak dapat dimanipulasi.
+- 🔄 **Retur Penjualan, Void Transaksi & Diskon Promo (F6)**:
+  - Pembatalan transaksi penuh (*Void*) atau pengembalian sebagian barang (*Retur*) dengan persetujuan PIN Pemilik.
+  - Program diskon otomatis bertingkat: diskon persentase/nominal, beli X gratis Y, minimum belanja, bundling paket hemat, serta diskon khusus pelanggan kasbon.
 - 📦 **Manajemen Stok Lanjutan & FEFO (F7)**:
-  - Alert stok minimum per produk.
-  - Tanggal kedaluwarsa berbasis batch dengan algoritma **First Expired, First Out (FEFO)** dan status H-0 (Expired), H-7, H-30.
-  - Stok opname fisik dengan scanner barcode, perhitungan selisih kuantiti, dan selisih nilai finansial rupiah (HPP).
+  - Tanggal kedaluwarsa berbasis batch dengan algoritma **First Expired, First Out (FEFO)** dan visualisasi alert H-0 (Expired), H-7, H-30.
+  - Stok opname fisik dengan scanner barcode dan perhitungan selisih kuantiti serta nilai finansial rupiah (HPP).
   - Penyesuaian stok manual dengan alasan wajib (rusak, hilang, kedaluwarsa, konsumsi sendiri).
   - Rekomendasi kulakan cerdas berdasarkan kecepatan penjualan 30 hari + ekspor daftar belanja ke WhatsApp.
-  - Kartu stok produk dengan saldo berjalan (*running balance*).
-- 👥 **Buku Kasbon & Pelanggan (F1)**: Pencatatan limit kredit, jatuh tempo, mutasi kasbon, dan pengingat WhatsApp 1-klik.
-- 📊 **Laporan Finansial & Omzet (F2)**: Laba kotor riil berdasarkan HPP, margin produk, ringkasan kas masuk/keluar, dan export laporan.
-- 💳 **Pembayaran Non-Tunai & QRIS Toko (F4)**: Modal QRIS Statis standee, split payment (tunai + QRIS), dan layar display pembeli (*Customer Display*) eksternal sinkron realtime.
-- 🛡️ **Shift Kasir & Multi-User (F5)**: Login PIN Kasir & Pemilik, serah terima shift kas, rekapitulasi selisih kas fisik, dan jejak rekam audit log.
-- 🔄 **Retur Penjualan & Void Nota (F6)**: Pembatalan nota salah atau pengembalian barang cacat dengan persetujuan PIN Pemilik.
-- 🔄 **Antrian Sinkronisasi Cerdas (Queue Sync)**: Transaksi kasir tetap aman di MySQL lokal saat offline dan otomatis sinkron ke cloud saat internet tersedia.
-- 🧾 **Struk Digital & Retensi 12 Jam**: Pelanggan dapat melihat nota online lewat QR code; struk otomatis terhapus dari cloud dalam 12 jam.
+  - Kartu stok produk dengan riwayat saldo berjalan (*running balance*).
+- 🚚 **Supplier & Kulakan Lanjutan (F8)**:
+  - Pencatatan faktur kulakan dari supplier lengkap dengan nomor nota, termin pembayaran, dan utang usaha.
+  - Pembaruan otomatis stok dan kalkulasi HPP baru secara akurat (*moving average*).
+- 📥 **Import & Ekspor Data Massal Excel / CSV (F9)**:
+  - Unduh template CSV resmi untuk Produk dan Pelanggan.
+  - Impor massal data master barang dan pelanggan dari Excel/CSV dengan validasi error baris per baris.
+  - Ekspor seluruh katalog produk, data pelanggan, mutasi stok fisik, dan riwayat transaksi penjualan dalam format CSV (UTF-8 BOM siap buka di Microsoft Excel).
+- 💾 **Pencadangan & Pemulihan Database Offline (F10)**:
+  - Pencadangan otomatis harian menggunakan utilitas native `mysqldump`.
+  - Pemulihan (*restore*) aman dari file SQL cadangan.
+- 🧾 **Struk Digital Cloud (Invoice Publik)**:
+  - Pelanggan dapat memindai QR code nota untuk melihat struk digital online.
+  - Struk otomatis terhapus dari cloud dalam 12 jam (retensi privasi).
 
 ---
 
 ## 🛠️ Prasyarat Sistem (Prerequisites)
 
-Sebelum memulai instalasi, pastikan sistem Anda memenuhi persyaratan:
-
 1. **Sistem Operasi**: Windows 10 atau Windows 11 (64-bit).
 2. **Node.js**: Versi `20.x` atau lebih baru ([Unduh Node.js LTS](https://nodejs.org/)).
 3. **Paket MySQL Portable Community Server (LTS)**:
-   - Unduh arsip ZIP MySQL Community Server (versi LTS, mis. `8.4.x`) dari [MySQL Downloads (Windows x86 64-bit ZIP)](https://dev.mysql.com/downloads/mysql/).
-   - Extract ZIP tersebut, Anda akan membutuhkan folder `bin/`, `lib/`, dan `share/`.
+   - Unduh ZIP MySQL Community Server (versi 8.4 LTS x86 64-bit) dari [MySQL Downloads](https://dev.mysql.com/downloads/mysql/).
+   - Ekstrak arsip tersebut; Anda membutuhkan folder `bin/`, `lib/`, dan `share/`.
 
 ---
 
@@ -79,50 +98,58 @@ cd POS-warung-madura
 
 ### 2. Setup Aplikasi Kasir Desktop (`pos_warung_madura`)
 
-#### A. Install Dependensi Node
-Buka terminal dan masuk ke folder `pos_warung_madura`:
+#### A. Masuk ke Direktori & Pasang Dependensi
 ```bash
 cd pos_warung_madura
 npm install
 ```
 
 #### B. Setup Binary MySQL Portable
-Letakkan folder `bin/`, `lib/`, dan `share/` hasil extract ZIP MySQL ke dalam folder `pos_warung_madura/resources/mysql/` sehingga strukturnya menjadi:
+Salin folder `bin/`, `lib/`, dan `share/` dari hasil ekstrak ZIP MySQL ke dalam folder `pos_warung_madura/resources/mysql/` sehingga strukturnya menjadi:
 ```
 pos_warung_madura/resources/mysql/
 ├── bin/
 │   ├── mysqld.exe
 │   ├── mysql.exe
+│   ├── mysqldump.exe
+│   ├── mysqladmin.exe
 │   └── ...
 ├── lib/
 ├── share/
-└── data/             (biarkan kosong, akan di-initialize otomatis saat pertama kali dibuka)
+└── data/             (folder data biarkan kosong, akan diinisialisasi otomatis)
 ```
 
-#### C. Konfigurasi Environment (`.env`)
+#### C. Pangkas Bloatware MySQL (Hemat ~813 MB!)
+Jalankan script pemangkas bloatware MySQL yang telah kami sediakan untuk menghapus symbol debug (.pdb), compiler lib, dan file yang tidak digunakan:
+```bash
+npm run mysql:strip
+```
+> 💡 *Ukuran folder `resources/mysql` akan langsung menyusut dari ~912 MB menjadi ~99 MB tanpa mengganggu fungsi database.*
+
+#### D. Konfigurasi Environment (`.env`)
 Salin file `.env.example` menjadi `.env`:
 ```bash
-cp .env.example .env
+copy .env.example .env
 ```
-Sesuaikan konfigurasi toko / warung Anda di dalam `.env` (nama warung, alamat, kode unik toko, dan secret key sinkronisasi).
+Sesuaikan konfigurasi toko Anda (nama toko, alamat, nomor WhatsApp, serta `SYNC_SECRET_KEY`).
 
 ---
 
 ### 3. Setup Layanan Struk Publik Cloud (`invoice_publik`)
 
-#### A. Install Dependensi Node
-Buka terminal baru dan masuk ke folder `invoice_publik`:
+#### A. Masuk ke Direktori & Pasang Dependensi
+Buka terminal baru di root repository:
 ```bash
-cd ../invoice_publik
+cd invoice_publik
 npm install
 ```
 
 #### B. Konfigurasi Environment (`.env`)
 Salin file `.env.example` menjadi `.env`:
 ```bash
-cp .env.example .env
+copy .env.example .env
 ```
-Buka file `.env` di `invoice_publik` dan isi kredensial Supabase Anda:
+Buka file `.env` di folder `invoice_publik` dan isi kredensial Supabase Anda:
 ```env
 PORT=5175
 SUPABASE_URL=https://your-project.supabase.co
@@ -131,61 +158,92 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 SYNC_SECRET_KEY=tok_live_ganti_dengan_secret_acak_anda
 INVOICE_RETENTION_HOURS=12
 ```
-> **Catatan**: Nilai `SYNC_SECRET_KEY` di `invoice_publik/.env` **HARUS SAMA** dengan `SYNC_SECRET_KEY` di `pos_warung_madura/.env`.
-> Anda dapat membuat secret acak 256-bit dengan perintah:
-> `node -e "console.log('tok_live_' + require('crypto').randomBytes(32).toString('hex'))"`
+> **PENTING**: Nilai `SYNC_SECRET_KEY` di `invoice_publik/.env` **WAJIB SAMA** dengan `SYNC_SECRET_KEY` di `pos_warung_madura/.env`.
 
 ---
 
-## 🖥️ Cara Menjalankan Aplikasi (Mode Development)
+## 🖥️ Menjalankan Aplikasi (Mode Development)
 
 ### 1. Jalankan Server Invoice Publik (Cloud)
 Di folder `invoice_publik`:
 ```bash
 npm run dev
 ```
-Server invoice publik akan berjalan di `http://127.0.0.1:5175`.
+Server invoice berjalan di `http://127.0.0.1:5175`.
 
 ### 2. Jalankan Aplikasi Desktop POS Kasir
 Di folder `pos_warung_madura`:
 ```bash
 npm run electron:dev
 ```
-Perintah ini akan:
+Perintah ini otomatis:
 1. Menyalakan Vite Dev Server (`https://127.0.0.1:5174`).
-2. Menyalakan MySQL Portable otomatis pada port `3307`.
-3. Membuka jendela aplikasi desktop Electron dengan dukungan *Hot Module Reloading* (HMR).
+2. Menyalakan MySQL Portable pada port `3307`.
+3. Mengompilasi TypeScript Electron process.
+4. Membuka jendela desktop Electron dengan dukungan *Hot Module Reloading* (HMR).
 
 ---
 
-## 📦 Membangun Paket Produksi (Packaging Desktop Installer)
+## 📜 Daftar Perintah Lengkap (`package.json`)
 
-Untuk membuat aplikasi siap pakai (distribusi ke laptop kasir tanpa perlu terminal / Node.js):
+Berikut adalah seluruh perintah `npm` yang tersedia di dalam `pos_warung_madura/package.json`:
+
+### 🛠️ Development & Running
+| Perintah | Fungsi |
+|---|---|
+| `npm run electron:dev` | **(Rekomendasi Dev)** Menjalankan Vite dev server + Electron desktop kasir secara simultan. |
+| `npm run dev` | Menjalankan web dev server React Router saja (`localhost:5174`). |
+| `npm run dev:all` | Menjalankan seluruh proses development bersamaan dengan scanner websocket. |
+| `npm run ws:scanner` | Menjalankan server websocket scanner kamera nirkabel secara terpisah. |
+| `npm run start` | Menjalankan production server React Router via `@react-router/serve`. |
+
+### 🗄️ Manajemen Database
+| Perintah | Fungsi |
+|---|---|
+| `npm run db:init` | Menginisialisasi skema database dan membuat tabel awal jika belum ada. |
+| `npm run db:refresh` | Mereset database dan mengisi ulang data awal warung (10 produk, grosir, kasbon, akun kasir/pemilik). |
+| `npm run db:seed` | Alias dari `npm run db:refresh`. |
+| `npm run db:clean` | Mereset database menjadi **KOSONG (0 produk/transaksi)**, siap untuk data nyata warung Anda. |
+| `npm run db:reset-hard` | Melakukan drop database dan membangun ulang dari nol dengan data awal warung. |
+| `npm run db:clean-hard` | Melakukan drop database dan membangun ulang dari nol dalam kondisi bersih kosong tanpa seed. |
+
+### 📦 Build & Packaging Produksi
+| Perintah | Fungsi |
+|---|---|
+| `npm run electron:build` | **(Satu Perintah Lengkap)** Mem-build frontend/server, mengompilasi TypeScript Electron, generate icon, strip bloatware MySQL, dan membuat installer NSIS `.exe`. |
+| `npm run build` | Mem-build bundle client dan server React Router v8 untuk mode produksi. |
+| `npm run build:electron` | Mengompilasi TypeScript Electron (`electron/main.ts`) ke `dist-electron/main.js`. |
+| `npm run icon:generate` | Mengonversi `public/icons/icon.png` menjadi icon multi-resolusi Windows `public/icons/icon.ico`. |
+| `npm run mysql:strip` | Memangkas file debug `.pdb`, `.lib`, `.pl`, dan bahasa tak terpakai pada MySQL portable (hemat ~813 MB). |
+| `npm run typecheck` | Menjalankan pemeriksaan tipe TypeScript dan typegen React Router. |
+
+---
+
+## 📦 Membangun Paket Installer Desktop (Packaging)
+
+Untuk membuat aplikasi installer siap pakai bagi laptop kasir:
 
 Masuk ke folder `pos_warung_madura`:
 
-### Opsi A: Buat Unpacked Portable (Folder Siap Pakai Langsung)
-```bash
-npm run build && npm run build:electron && npx electron-builder --win --dir
-```
-Hasil build akan berada di:
-```
-pos_warung_madura/release/win-unpacked/POS Warung Madura.exe
-```
-Tinggal dobel klik file `.exe` tersebut, aplikasi akan langsung berjalan.
-
-### Opsi B: Buat File Installer NSIS (.exe Setup)
+### Opsi A: Buat File Installer NSIS (.exe Setup)
 ```bash
 npm run electron:build
 ```
-Installer akan dihasilkan di:
+Installer siap distribusi akan dihasilkan di:
 ```
-pos_warung_madura/release/POS Warung Madura Setup 1.9.0.exe
+pos_warung_madura/release/POS Warung Madura Setup 3.1.0.exe
 ```
+*(Ukuran berkas installer hanya **~113 MB**, siap didistribusikan ke laptop kasir tanpa perlu instalasi Node.js).*
 
-> 💡 **Unduh Langsung Tanpa Build**:  
-> File installer `.exe` yang sudah siap pakai juga selalu diunggah ke:  
-> 🔗 **https://github.com/AbrorilHuda/POS-warung-madura/releases**
+### Opsi B: Buat Folder Portable Unpacked (Langsung Dobel-Klik)
+Jika ingin menguji aplikasi tanpa proses instalasi:
+```bash
+npm run build && npm run build:electron && npx electron-builder --win --dir
+```
+Hasil aplikasi langsung jalan berada di:
+```
+pos_warung_madura/release/win-unpacked/POS Warung Madura.exe
+```
 
 ---
 
@@ -200,101 +258,47 @@ Aplikasi dilengkapi fitur scanner kamera HP (shortcut **F12**) yang terhubung se
    New-NetFirewallRule -DisplayName "POS Warung Madura - Port 4000" `
      -Direction Inbound -Protocol TCP -LocalPort 4000 -Action Allow -Profile Private
    ```
-2. Pastikan HP dan Laptop terhubung ke **jaringan Wi-Fi yang sama**.
+2. Pastikan HP dan Laptop kasir terhubung ke **jaringan Wi-Fi yang sama**.
 
 ### Langkah Menghubungkan HP:
 1. Di aplikasi kasir laptop, tekan tombol **F12** atau klik tombol **"Hubungkan HP Scanner"** di pojok kiri bawah.
-2. QR Code akan muncul di layar laptop.
-3. Buka kamera HP atau Google Lens, arahkan ke QR Code tersebut dan buka tautan `https://<ip-laptop>:4000/scanner`.
-4. **Penting**: Karena menggunakan sertifikat SSL internal (self-signed) untuk mengaktifkan akses kamera:
-   - Pada browser HP (Chrome/Safari), tap tombol **Lanjutan / Advanced**.
-   - Pilih **Lanjutkan ke situs (tidak aman) / Proceed to ... (unsafe)**.
-   - Pilihan ini hanya perlu diklik **satu kali** per perangkat HP.
+2. QR Code pairing akan muncul di layar kasir.
+3. Buka kamera HP atau browser HP, pindai QR Code tersebut dan buka alamat `https://<ip-laptop>:4000/scanner`.
+4. **Penting**: Karena menggunakan sertifikat SSL lokal (self-signed) untuk izin akses kamera:
+   - Pada browser HP, pilih **Lanjutan / Advanced**.
+   - Klik **Lanjutkan ke situs (tidak aman) / Proceed to ... (unsafe)**.
+   - Langkah ini hanya perlu disetujui **1 kali** per HP.
 5. Izinkan akses kamera di browser HP.
-6. Arahkan kamera HP ke barcode barang — item belanjaan akan **langsung masuk secara instan ke keranjang kasir laptop**!
+6. Arahkan kamera HP ke barcode barang — produk belanjaan akan **langsung masuk secara instan ke keranjang kasir laptop**!
 
 ---
 
 ## ❓ FAQ & Troubleshooting
 
-### 1. Port 3307 bentrok dengan proses lain?
-MySQL portable diatur ke port `3307` agar tidak bentrok dengan Laragon/XAMPP (port `3306`). Jika port 3307 terpakai, hentikan proses lama di PowerShell:
+### 1. Port 3307 bentrok atau MySQL tidak mau menyala?
+MySQL portable diatur ke port `3307` agar tidak bentrok dengan XAMPP/Laragon (port `3306`). Jika ada sisa proses lama, hentikan di PowerShell:
 ```powershell
 Stop-Process -Name mysqld -Force
 ```
 
-### 2. Bagaimana cara mereset atau me-refresh database lokal ke kondisi awal?
-Gunakan script otomatis yang telah disediakan di folder `pos_warung_madura`:
-- **Refresh & Isi Ulang Data Warung Lengkap (Default)**:
-  ```bash
-  cd pos_warung_madura
-  npm run db:refresh
-  ```
-  *Mereset database dan mengisi ulang 10 produk warung Madura, multi-satuan, harga bertingkat grosir, batch FEFO, pelanggan kasbon, serta akun kasir/pemilik.*
-- **Refresh Total Bersih TANPA SEED (Kosong Siap Input Barang Riil)**:
-  ```bash
-  npm run db:clean
-  # atau: node scripts/refresh-db.mjs --no-seed
-  ```
-  *Mereset seluruh data produk dan transaksi menjadi KOSONG (0 data). Tabel dan akun login tetap dibuat bersih siap untuk operasional toko nyata Anda.*
-- **Hard Reset Total (Drop & Rebuild Database)**:
-  ```bash
-  npm run db:reset-hard
-  # atau kosong tanpa seed: npm run db:clean-hard
-  ```
-- **Hanya Bersihkan Riwayat Transaksi (Pertahankan Master Barang)**:
-  ```bash
-  node scripts/refresh-db.mjs --clean-transactions
-  ```
-- **Reset Manual Folder Data**:
-  Hapus seluruh file di dalam folder `pos_warung_madura/resources/mysql/data/` (jangan hapus foldernya, biarkan kosong). Saat aplikasi dijalankan kembali, Electron akan menginisialisasi ulang database dan mengeksekusi skema awal secara otomatis.
+### 2. Bagaimana cara mengosongkan database untuk toko baru?
+Jalankan perintah berikut di folder `pos_warung_madura`:
+```bash
+npm run db:clean
+```
+Data produk demo dan riwayat transaksi akan dikosongkan, sementara tabel, konfigurasi toko, dan akun kasir/pemilik tetap dibuat bersih.
 
-### 3. Di mana lokasi data database dan sertifikat saat aplikasi terpasang di client?
-Pada mode produksi, data disimpan di direktori data aplikasi Windows (`%APPDATA%`):
+### 3. Di mana lokasi penyimpanan data kasir saat aplikasi terpasang?
+Pada mode produksi, database dan sertifikat disimpan di direktori data aplikasi Windows pengguna (`%APPDATA%`):
 - Database MySQL: `%APPDATA%\pos_warung_madura\mysql-data\`
 - Sertifikat SSL: `%APPDATA%\pos_warung_madura\certs\`
-Lokasi ini aman dari pembatasan hak akses (*permission*) Windows dan tidak akan terhapus saat pembaruan aplikasi.
+- Berkas Log: `%APPDATA%\pos_warung_madura\app.log`
 
----
-
-## 🤝 Kontribusi & Menuju Cross-Platform (Mari Berkontribusi!)
-
-Saat ini, POS Warung Madura baru dioptimalkan untuk sistem operasi **Desktop Windows (.exe)** karena penggunaan binary bundle MySQL Portable internal Windows (`mysqld.exe`).
-
-Kami memiliki visi agar sistem kasir modern open source ini dapat dinikmati oleh seluruh pelaku UMKM dan warung di berbagai perangkat tanpa hambatan. Oleh karena itu, **kami sangat mengundang dan menyambut kontribusi dari komunitas pengembang** untuk mewujudkan dukungan **Cross-Platform**:
-
-### 🎯 Roadmap Cross-Platform yang Diharapkan:
-- 🐧 **Dukungan Linux (Ubuntu / Debian / Arch / Fedora)**:
-  - Pembuatan script build installer `AppImage` / `.deb` / `.rpm`.
-  - Wrapper deteksi dan inisialisasi service MariaDB / MySQL native di Linux.
-- 🍏 **Dukungan macOS (Apple Silicon M-Series & Intel)**:
-  - Konfigurasi packaging `.dmg` via electron-builder.
-  - Setup MySQL Portable / Homebrew service integration untuk macOS.
-- 🗄️ **Abstraksi Database Alternatif (SQLite / PGLite)**:
-  - Eksplorasi driver database *embedded* zero-config tanpa daemon terpisah agar dapat berjalan langsung di OS apa pun secara instan.
-- 📱 **Web Standalone / PWA Kasir**:
-  - Dukungan mode web kasir murni yang bisa diakses langsung dari browser tablet (Android / iPad / Chromebook) tanpa harus membuka Electron.
-
-### 💡 Cara Berkontribusi:
-1. **Fork** repositori ini ke akun GitHub Anda.
-2. Buat branch fitur atau perbaikan baru:
-   ```bash
-   git checkout -b feature/dukungan-linux
-   ```
-3. Lakukan commit perubahan Anda dengan pesan yang jelas:
-   ```bash
-   git commit -m "feat: tambahkan skrip build dan konfigurasi electron untuk Linux"
-   ```
-4. Push branch ke repository fork Anda:
-   ```bash
-   git push origin feature/dukungan-linux
-   ```
-5. Buka **Pull Request (PR)** di repositori utama dan jelaskan perubahan yang Anda buat.
-6. Anda juga dapat membuka **[Issues](https://github.com/AbrorilHuda/POS-warung-madura/issues)** untuk melaporkan bug, mendiskusikan arsitektur, atau mengusulkan ide fitur baru!
+Data Anda aman dari pembatasan izin administrator Windows dan tidak akan terhapus saat aplikasi diperbarui.
 
 ---
 
 ## 👨‍💻 Kontributor & Lisensi
 
-Dibuat untuk memudahkan digitalisasi warung madura dan ritel UMKM Indonesia.  
+Dibuat untuk memajukan dan mendigitalisasi operasional warung madura dan retail UMKM Indonesia.  
 Copyright © 2026 **Abroril Huda**. Dilindungi lisensi MIT.

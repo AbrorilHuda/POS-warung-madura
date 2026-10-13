@@ -1,7 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import {
   getAllSuppliers,
-  getSupplierById,
   createSupplier,
   updateSupplier,
   deleteSupplier,

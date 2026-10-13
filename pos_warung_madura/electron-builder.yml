@@ -6,6 +6,7 @@ directories:
   output: release
   buildResources: resources
 
+# Menggunakan asar: false untuk kompatibilitas spawn node server eksternal
 asar: false
 
 files:
@@ -16,16 +17,23 @@ files:
   - "public/icons/**/*"
   - "package.json"
   - "!resources/**/*"
+  - "!**/*.map"
+  - "!**/*.pdb"
+  - "!**/*.ts"
+  - "!**/*.tsx"
 
 extraResources:
   - from: "resources/mysql/bin"
     to: "mysql/bin"
     filter:
       - "!**/*.pdb"
+      - "!**/*.lib"
+      - "!**/*.pl"
   - from: "resources/mysql/lib"
     to: "mysql/lib"
     filter:
       - "!**/*.pdb"
+      - "!**/*.lib"
   - from: "resources/mysql/share"
     to: "mysql/share"
   - from: "migrations/schema.sql"
@@ -33,6 +41,7 @@ extraResources:
 
 win:
   icon: "public/icons/icon.ico"
+  compression: "maximum"
   target:
     - target: nsis
       arch:
@@ -46,3 +55,4 @@ nsis:
   shortcutName: POS Warung Madura
   installerIcon: "public/icons/icon.ico"
   uninstallerIcon: "public/icons/icon.ico"
+  differentialPackage: false
